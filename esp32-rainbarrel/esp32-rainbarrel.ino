@@ -206,13 +206,13 @@ void handleUpdate() {
     updateState(); // update active state to match new user state
   }
   // output our current state
-  DynamicJsonDocument doc(1024);
+  StaticJsonDocument<96> doc;
   doc["user_state"] = state.user_state;
   doc["active_state"] = state.active_state;
   doc["pipe_water_present"] = state.pipe_water_present;
-  JsonArray data = doc.createNestedArray("water_level");
-  data.add(state.water_level[0]);
-  data.add(state.water_level[1]);
+  JsonArray water_level = doc.createNestedArray("water_level");
+  water_level.add(state.water_level[0]);
+  water_level.add(state.water_level[1]);
   String out = "";
   serializeJson(doc, out);
   server.send(200, "text/json", out);
@@ -433,15 +433,15 @@ void sendUpdate(int new_user_state = -1) {
     url2 += "&state=";
     url2 += new_user_state;
   }
-  Serial.println(url2);
+  //Serial.println(url2);
   http.begin(url2);
   int httpCode = http.GET();
   if (httpCode == HTTP_CODE_OK) {
-    DynamicJsonDocument root(1024);
+    StaticJsonDocument<192> root;
     DeserializationError error = deserializeJson(root, http.getStream());
     if (error) {
-      Serial.print("deserializeJson failed: ");
-      Serial.println(error.c_str());
+      Serial.print(F("deserializeJson failed: "));
+      Serial.println(error.f_str());
     } else {
       state.user_state = root["user_state"];
       state.active_state = root["active_state"];
