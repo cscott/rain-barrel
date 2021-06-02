@@ -1,5 +1,13 @@
-#define RAIN_SERVER
-#undef RAIN_CLIENT
+#ifdef RAIN_SERVER
+# ifdef RAIN_CLIENT
+#  error Can not define both RAIN_SERVER and RAIN_CLIENT, pick one!
+# endif
+#else
+# ifndef RAIN_CLIENT
+#  error Must defined either RAIN_SERVER or RAIN_CLIENT!
+# endif
+#endif
+
 #define MOTOR_DRIVER_CONNECTED
 #undef TOUCH_INPUTS
 #undef DEV_MODE // shorter delays for easier development
@@ -52,7 +60,7 @@
 #define COLOR3 EPD_DARK
 
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(4, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
-// 2.9" Grayscale Featherwing or Breakout:
+// 2.9in Grayscale Featherwing or Breakout:
 ThinkInk_290_Grayscale4_T5 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
 AsyncDelay displayMaxRefresh = AsyncDelay(24 * 60 * 60 * 1000, AsyncDelay::MILLIS); // once a day need it or not
 AsyncDelay displayMinRefresh = AsyncDelay(5 * 1000, AsyncDelay::MILLIS); // no more than once/five seconds
@@ -112,7 +120,8 @@ Adafruit_MQTT_Publish waterLevel2Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX
 
 #ifdef RAIN_SERVER
 # define MDNS_NAME SERVER_MDNS_NAME
-#else
+#endif
+#ifdef RAIN_CLIENT
 # define MDNS_NAME CLIENT_MDNS_NAME
 #endif
 
@@ -211,22 +220,22 @@ void handleRoot() {
 
   snprintf(temp, 800,
 
-           "<html>\
-  <head>\
-    <meta http-equiv='refresh' content='5'/>\
-    <title>Rainbarrel Pump Manager</title>\
-    <style>\
-      body { background-color: #fff; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
-    </style>\
-  </head>\
-  <body>\
-    <h1>Rainbarrel Pump Manager</h1>\
-    <p>Uptime: %02d:%02d:%02d</p>\
-    <p>User mode: %s %s %s</p>\
-    <p>Active water source: %s</p>\
-    <img src=\"/test.svg\" />\
-  </body>\
-</html>",
+           "<html>\n"
+"  <head>\n"
+"    <meta http-equiv='refresh' content='5'/>\n"
+"    <title>Rainbarrel Pump Manager</title>\n"
+"    <style>\n"
+"      body { background-color: #fff; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\n"
+"    </style>\n"
+"  </head>\n"
+"  <body>\n"
+"    <h1>Rainbarrel Pump Manager</h1>\n"
+"    <p>Uptime: %02d:%02d:%02d</p>\n"
+"    <p>User mode: %s %s %s</p>\n"
+"    <p>Active water source: %s</p>\n"
+"    <img src=\"/test.svg\" />\n"
+"  </body>\n"
+"</html>",
 
            hr, min % 60, sec % 60,
            state.user_state == STATE_CITY ? "<b>CITY</b>" : "<a href='/update?state=0'>city</a>",
