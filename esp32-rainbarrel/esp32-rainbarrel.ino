@@ -6,14 +6,18 @@
 
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <Adafruit_NeoPixel.h>
 #include <Adafruit_ThinkInk.h>
+#include <Adafruit_MQTT.h>
+#include <Adafruit_MQTT_Client.h>
 #include <ArduinoJson.h>
 #include <AsyncDelay.h>
+#include "config.h"
 #include "bluehigh-12px.h"
 #include "bluebold-14px.h"
 #include "icons.h"
@@ -38,9 +42,6 @@
 #define WATER_READING_FULL 1024
 #define TOUCH_THRESHOLD 105 // percent
 
-const char* ssid = "GriggsCorner";
-const char* password = "lottedog";
-
 #define EPD_DC      7 // can be any pin, but required!
 #define EPD_CS      8  // can be any pin, but required!
 #define EPD_BUSY    -1  // can set to -1 to not use a pin (will wait a fixed delay)
@@ -55,9 +56,59 @@ Adafruit_NeoPixel pixels = Adafruit_NeoPixel(4, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ8
 ThinkInk_290_Grayscale4_T5 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
 AsyncDelay displayMaxRefresh = AsyncDelay(24 * 60 * 60 * 1000, AsyncDelay::MILLIS); // once a day need it or not
 AsyncDelay displayMinRefresh = AsyncDelay(5 * 1000, AsyncDelay::MILLIS); // no more than once/five seconds
-AsyncDelay lightLevelDelay = AsyncDelay(1000, AsyncDelay::MILLIS); // 1 Hz
+AsyncDelay lightLevelDelay = AsyncDelay(1*1000, AsyncDelay::MILLIS); // 1 Hz
 int lightLevel = 0;
-int lastBrightness = 50;
+int lastBrightness = 0;
+
+// WiFiClientSecure for SSL/TLS support
+WiFiClientSecure client;
+// Setup the MQTT client class by passing in the WiFi client and MQTT server and login details
+Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
+AsyncDelay mqttDelay = AsyncDelay(5000, AsyncDelay::MILLIS); // retry every 5 seconds if not connected
+// io.adafruit.com root CA
+const char* adafruitio_root_ca = \
+    "-----BEGIN CERTIFICATE-----\n" \
+    "MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh\n" \
+    "MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\n" \
+    "d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBD\n" \
+    "QTAeFw0wNjExMTAwMDAwMDBaFw0zMTExMTAwMDAwMDBaMGExCzAJBgNVBAYTAlVT\n" \
+    "MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j\n" \
+    "b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IENBMIIBIjANBgkqhkiG\n" \
+    "9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4jvhEXLeqKTTo1eqUKKPC3eQyaKl7hLOllsB\n" \
+    "CSDMAZOnTjC3U/dDxGkAV53ijSLdhwZAAIEJzs4bg7/fzTtxRuLWZscFs3YnFo97\n" \
+    "nh6Vfe63SKMI2tavegw5BmV/Sl0fvBf4q77uKNd0f3p4mVmFaG5cIzJLv07A6Fpt\n" \
+    "43C/dxC//AH2hdmoRBBYMql1GNXRor5H4idq9Joz+EkIYIvUX7Q6hL+hqkpMfT7P\n" \
+    "T19sdl6gSzeRntwi5m3OFBqOasv+zbMUZBfHWymeMr/y7vrTC0LUq7dBMtoM1O/4\n" \
+    "gdW7jVg/tRvoSSiicNoxBN33shbyTApOB6jtSj1etX+jkMOvJwIDAQABo2MwYTAO\n" \
+    "BgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUA95QNVbR\n" \
+    "TLtm8KPiGxvDl7I90VUwHwYDVR0jBBgwFoAUA95QNVbRTLtm8KPiGxvDl7I90VUw\n" \
+    "DQYJKoZIhvcNAQEFBQADggEBAMucN6pIExIK+t1EnE9SsPTfrgT1eXkIoyQY/Esr\n" \
+    "hMAtudXH/vTBH1jLuG2cenTnmCmrEbXjcKChzUyImZOMkXDiqw8cvpOp/2PV5Adg\n" \
+    "06O/nVsJ8dWO41P0jmP6P6fbtGbfYmbW0W5BjfIttep3Sp+dWOIrWcBAI+0tKIJF\n" \
+    "PnlUkiaY4IBIqDfv8NZ5YBberOgOzW6sRBc4L0na4UU+Krk2U886UAb3LujEV0ls\n" \
+    "YSEY1QSteDwsOoBrp+uvFRTp2InBuThs4pFsiv9kuXclVzDAGySj4dzp30d8tbQk\n" \
+    "CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=\n" \
+    "-----END CERTIFICATE-----\n";
+/****************************** Feeds ***************************************/
+
+// Setup a feed called 'test' for publishing.
+// Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
+#define FEED_PREFIX AIO_USERNAME "/feeds/rain-barrels."
+AsyncDelay lightLevelFeedDelay = AsyncDelay(60*1000, AsyncDelay::MILLIS); // 1/minute
+#ifdef RAIN_SERVER
+Adafruit_MQTT_Publish lightLevelFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "ambient-light-server");
+
+AsyncDelay valveStateFeedMaxDelay = AsyncDelay(60*60*1000, AsyncDelay::MILLIS); // at least 1/hr
+AsyncDelay valveStateFeedMinDelay = AsyncDelay(1000, AsyncDelay::MILLIS); // not more than 1/second
+Adafruit_MQTT_Publish valveStateFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "water-source");
+#endif
+#ifdef RAIN_CLIENT
+Adafruit_MQTT_Publish lightLevelFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "ambient-light-client");
+
+AsyncDelay waterLevelFeedDelay = AsyncDelay(10*1000, AsyncDelay::MILLIS); // every 10s
+Adafruit_MQTT_Publish waterLevel1Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel1");
+Adafruit_MQTT_Publish waterLevel2Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel2");
+#endif
 
 #ifdef RAIN_SERVER
 # define MDNS_NAME SERVER_MDNS_NAME
@@ -153,30 +204,34 @@ void boldface() {
 #ifdef RAIN_SERVER
 // Web server
 void handleRoot() {
-  char temp[400];
+  char temp[800];
   int sec = millis() / 1000;
   int min = sec / 60;
   int hr = min / 60;
 
-  snprintf(temp, 400,
+  snprintf(temp, 800,
 
            "<html>\
   <head>\
     <meta http-equiv='refresh' content='5'/>\
     <title>Rainbarrel Pump Manager</title>\
     <style>\
-      body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
+      body { background-color: #fff; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
     </style>\
   </head>\
   <body>\
     <h1>Rainbarrel Pump Manager</h1>\
     <p>Uptime: %02d:%02d:%02d</p>\
-    <p>Current water source: %s</p>\
+    <p>User mode: %s %s %s</p>\
+    <p>Active water source: %s</p>\
     <img src=\"/test.svg\" />\
   </body>\
 </html>",
 
            hr, min % 60, sec % 60,
+           state.user_state == STATE_CITY ? "<b>CITY</b>" : "<a href='/update?state=0'>city</a>",
+           state.user_state == STATE_AUTO ? "<b>AUTO</b>" : "<a href='/update?state=1'>auto</a>",
+           state.user_state == STATE_RAIN ? "<b>RAIN</b>" : "<a href='/update?state=2'>rain</a>",
            state.active_state == STATE_CITY ? "City water" : "Rain barrels"
           );
   server.send(200, "text/html", temp);
@@ -317,17 +372,19 @@ void setup() {
   normalface();
   display.setTextWrap(true);
   display.print("Connecting to SSID: ");
-  display.println(ssid);
+  display.println(WIFI_SSID);
   display.display();
 
   Serial.println("Booting");
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println("Connection Failed! Rebooting...");
     delay(5000);
     ESP.restart();
   }
+  // Set Adafruit IO's root CA
+  client.setCACert(adafruitio_root_ca);
 
   // Port defaults to 3232
   // ArduinoOTA.setPort(3232);
@@ -456,23 +513,47 @@ void sendUpdate(int new_user_state = -1) {
 }
 #endif
 
+void updatePixels(int brightness) {
+  pixels.setBrightness(brightness);
+  if (state.active_state == STATE_CITY) {
+    pixels.fill(0x0000FF);
+  } else {
+    pixels.fill(0x00FF00);
+  }
+  pixels.show();
+}
+
 void updateState() {
   if (lightLevelDelay.isExpired()) {
+    // make neopixel color match the user state
+    updatePixels(0);  // turn off the backlight for a true reading of ambient
+
     lightLevel = analogRead(LIGHT_SENSOR);
+
+    updatePixels(lastBrightness);
+
+    if (lightLevelFeedDelay.isExpired() && mqtt.connected()) {
+      lightLevelFeed.publish(lightLevel);
+      lightLevelFeedDelay.restart();
+    }
     lightLevelDelay.restart();
-    //Serial.print("Light level: ");
-    //Serial.println(lightLevel);
   }
 #ifdef RAIN_CLIENT
   if (lastLevelReading.isExpired()) {
     // XXX read our level sensors
-    state.water_level[0] = random(0, 1000); // analogRead(LEVEL_SENSOR1_PIN);
-    state.water_level[1] = random(0, 1000); // analogRead(LEVEL_SENSOR2_PIN);
+    state.water_level[0] = random(WATER_ALARM_LOW+1, 1000); // analogRead(LEVEL_SENSOR1_PIN);
+    state.water_level[1] = random(WATER_ALARM_LOW+1, 1000); // analogRead(LEVEL_SENSOR2_PIN);
     lastLevelReading.restart();
   }
   if (lastPing.isExpired() || !state_equal(&state, &last_xmit_state)) {
     // send our levels to the server via a GET request and update our copy of the server state
     sendUpdate();
+  }
+  // XXX periodically send levels to AIO
+  if (waterLevelFeedDelay.isExpired() && mqtt.connected()) {
+    waterLevel1Feed.publish(state.water_level[0]);
+    waterLevel2Feed.publish(state.water_level[1]);
+    waterLevelFeedDelay.restart();
   }
 #endif
 #ifdef RAIN_SERVER
@@ -505,6 +586,8 @@ void updateState() {
     cityValve->run(FORWARD);
     if (lastValveState != STATE_CITY) {
       lastValveState = STATE_CITY;
+      valveStateFeedMaxDelay.expire();
+
       cityValve->setSpeed(255);
       valveRunLength.restart();
     }
@@ -513,6 +596,8 @@ void updateState() {
     cityValve->run(BACKWARD);
     if (lastValveState != STATE_RAIN) {
       lastValveState = STATE_RAIN;
+      valveStateFeedMaxDelay.expire();
+
       cityValve->setSpeed(255);
       valveRunLength.restart();
     }
@@ -523,6 +608,12 @@ void updateState() {
     cityValve->setSpeed(0);
   }
 #endif
+  if (valveStateFeedMaxDelay.isExpired() && valveStateFeedMinDelay.isExpired() && mqtt.connected()) {
+    valveStateFeed.publish( state.active_state == STATE_CITY ? "building-o" : "w:raindrops" );
+    // don't reset valveStateFeedDelay, we don't need to periodically send this.
+    valveStateFeedMinDelay.restart();
+    valveStateFeedMaxDelay.restart();
+  }
 #endif
 }
 
@@ -545,23 +636,30 @@ void rightjustify(const char *str) {
 
 void updateDisplay() {
   // Adjust NeoPixel brightness
-  // Measured light levels: 1400-1500 in my office indoors at night
-  //                        0 with my finger over it
+  // Measured light levels:
+  // 8191 cloudy day outside (this is saturated)
+  // 5800 in my office during the daytime with the lights on (cloudy day)
+  // 4200 in my office during the daytime with the lights off (cloudy day)
+  // 1400-1500 in my office indoors at night
+  // 0 with my finger over it
   int newBrightness = 50;
-#ifdef RAIN_CLIENT
+#if 0
   if (lightLevel < 1000 || lightLevel > 2000) { // XXX is this the right relationship?
     newBrightness = 255;
   }
 #endif
   if (newBrightness != lastBrightness) {
     lastBrightness = newBrightness;
-    pixels.setBrightness(lastBrightness);
-    pixels.show();
+    updatePixels(lastBrightness);
   }
   // eInk display update
   if (state_equal(&state, &last_displayed_state) && !displayMaxRefresh.isExpired()) {
     return; // don't update if nothing has changed
   }
+
+  // make neopixel color match the user state
+  updatePixels(lastBrightness);
+
   if (!displayMinRefresh.isExpired()) {
     return; // don't update too frequently
   }
@@ -688,14 +786,6 @@ void updateDisplay() {
   }
 
   display.display(); // or partial update?
-
-  // make neopixel color match the user state
-  if (state.active_state == STATE_CITY) {
-    pixels.fill(0x0000FF);
-  } else {
-    pixels.fill(0x00FF00);
-  }
-  pixels.show();
 }
 
 uint32_t audio_pointer = 0;
@@ -727,6 +817,13 @@ void loop() {
     return;
   }
   ArduinoOTA.handle();
+  if ((!mqtt.connected()) && mqttDelay.isExpired()) {
+    int ret = mqtt.connect();
+    if (ret != 0) {
+      Serial.println(mqtt.connectErrorString(ret));
+    }
+    mqttDelay.restart();
+  }
 #ifdef RAIN_SERVER
   server.handleClient();
   // Update user state via buttons
