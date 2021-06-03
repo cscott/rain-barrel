@@ -9,7 +9,6 @@
 #endif
 
 #define MOTOR_DRIVER_CONNECTED
-#undef TOUCH_INPUTS
 #undef DEV_MODE // shorter delays for easier development
 
 #include <WiFi.h>
@@ -37,6 +36,7 @@
 #endif
 #ifdef RAIN_CLIENT
 # include <HTTPClient.h>
+# include <Adafruit_MPR121.h>
 #endif
 
 #define SERVER_MDNS_NAME "rainpump"
@@ -48,7 +48,6 @@
 #define SERVER_PORT 80
 #define WATER_READING_ZERO 0
 #define WATER_READING_FULL 1024
-#define TOUCH_THRESHOLD 105 // percent
 
 #define EPD_DC      7 // can be any pin, but required!
 #define EPD_CS      8  // can be any pin, but required!
@@ -64,9 +63,12 @@ Adafruit_NeoPixel pixels = Adafruit_NeoPixel(4, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ8
 ThinkInk_290_Grayscale4_T5 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
 AsyncDelay displayMaxRefresh = AsyncDelay(24 * 60 * 60 * 1000, AsyncDelay::MILLIS); // once a day need it or not
 AsyncDelay displayMinRefresh = AsyncDelay(5 * 1000, AsyncDelay::MILLIS); // no more than once/five seconds
+
 AsyncDelay lightLevelDelay = AsyncDelay(1*1000, AsyncDelay::MILLIS); // 1 Hz
 int lightLevel = 0;
 int lastBrightness = 0;
+
+AsyncDelay debounceDelay = AsyncDelay(500, AsyncDelay::MILLIS); // switch debounce
 
 // WiFiClientSecure for SSL/TLS support
 WiFiClientSecure client;
@@ -149,10 +151,8 @@ AsyncDelay lastLevelReading = AsyncDelay(LEVEL_SENSOR_INTERVAL_SECS * 1000, Asyn
 AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 
-AsyncDelay touchDelay = AsyncDelay(2000, AsyncDelay::MILLIS);
-int touchPins[3] = { T14, T12, T11 };
-int touchButtons[3] = { BUTTON_A, BUTTON_B, BUTTON_C };
-int touchBase[3];
+Adafruit_MPR121 capTouch = Adafruit_MPR121();
+boolean capPresent = false;
 #endif
 
 enum PumpState {
@@ -325,11 +325,10 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);
   pinMode(BUTTON_A, INPUT_PULLUP);
-#ifndef TOUCH_INPUTS
   pinMode(BUTTON_B, INPUT_PULLUP);
   pinMode(BUTTON_C, INPUT_PULLUP);
   pinMode(BUTTON_D, INPUT_PULLUP);
-#endif
+
   // set speaker enable pin to output
   pinMode(SPEAKER_SHUTDOWN, OUTPUT);
   // and immediately disable it to save power
@@ -349,13 +348,11 @@ void setup() {
 #endif
 
 #ifdef RAIN_CLIENT
-#ifdef TOUCH_INPUTS
   pinMode(LEVEL_SENSOR1_PIN, INPUT);
   pinMode(LEVEL_SENSOR2_PIN, INPUT);
-  for (int i = 0; i < 3; i++) {
-    touchBase[i] = touchRead(touchPins[i]);
-  }
-#endif
+  delay(100); // cap touch needs a moment!
+  capPresent = capTouch.begin(); // default I2C address for cap touch sensor
+  //capPresent = true;
 #endif
 
   // for light sensor
@@ -687,6 +684,9 @@ void updateDisplay() {
   display.setCursor(4, 17);
   display.setTextSize(1);
   display.print(WiFi.localIP());
+#ifdef RAIN_CLIENT
+  display.print(capPresent ? "+" : "-");
+#endif
   display.setCursor(display.width() - 4, 17);
   rightjustify(MDNS_NAME ".local");
 
@@ -833,19 +833,42 @@ void loop() {
     }
     mqttDelay.restart();
   }
+  // Update user state via buttons
+  int button_press = 0;
+  if (!debounceDelay.isExpired()) {
+    // suppress button presses while debouncing
+  } else if (! digitalRead(BUTTON_A)) {
+    button_press = BUTTON_A;
+  } else if (! digitalRead(BUTTON_B)) {
+    button_press = BUTTON_B;
+  } else if (! digitalRead(BUTTON_C)) {
+    button_press = BUTTON_C;
+  } else if (! digitalRead(BUTTON_D)) {
+    button_press = BUTTON_D;
+  }
+#ifdef RAIN_CLIENT
+  int touched = (capPresent && debounceDelay.isExpired()) ? capTouch.touched() : 0;
+  if (touched & (1<<0)) { button_press = BUTTON_A; }
+  else if (touched & (1<<1)) { button_press = BUTTON_B; }
+  else if (touched & (1<<2)) { button_press = BUTTON_C; }
+  else if (touched & (1<<3)) { button_press = BUTTON_D; }
+#endif
+  if (button_press != 0) {
+    debounceDelay.restart();
+  }
 #ifdef RAIN_SERVER
   server.handleClient();
   // Update user state via buttons
-  if (! digitalRead(BUTTON_A)) {
+  if (button_press == BUTTON_A) {
     state.user_state = STATE_CITY;
     start_audio();
-  } else if (! digitalRead(BUTTON_B)) {
+  } else if (button_press == BUTTON_B) {
     state.user_state = STATE_AUTO;
     start_audio();
-  } else if (! digitalRead(BUTTON_C)) {
+  } else if (button_press == BUTTON_C) {
     state.user_state = STATE_RAIN;
     start_audio();
-  } else if (! digitalRead(BUTTON_D)) {
+  } else if (button_press == BUTTON_D) {
     // XXX for testing
     state.pipe_water_present = !state.pipe_water_present;
     state.connected_recently = !state.connected_recently;
@@ -855,31 +878,6 @@ void loop() {
 #endif
 #ifdef RAIN_CLIENT
   // read buttons, if pressed immediately sent a ?state= request to the server and expire lastPing()
-  // Update user state via buttons
-  int button_press = 0;
-#ifdef TOUCH_INPUTS
-  if (touchDelay.isExpired()) {
-    touchDelay.restart();
-    for (int i = 0; i < 3; i++) {
-      int recent = touchRead(touchPins[i]);
-      Serial.print(i); Serial.print(": "); Serial.print(touchBase[i]); Serial.print(" "); Serial.println(recent); delay(1);
-      if (button_press == 0 && recent > (touchBase[i] * TOUCH_THRESHOLD / 100)) {
-        button_press = touchButtons[i];
-      }
-      touchBase[i] = ((touchBase[i] * 9) + recent) / 10;
-    }
-  }
-#else
-  if (! digitalRead(BUTTON_A)) {
-    button_press = BUTTON_A;
-  } else if (! digitalRead(BUTTON_B)) {
-    button_press = BUTTON_B;
-  } else if (! digitalRead(BUTTON_C)) {
-    button_press = BUTTON_C;
-  } else if (! digitalRead(BUTTON_D)) {
-    button_press = BUTTON_D;
-  }
-#endif
   if (button_press == BUTTON_A) {
     sendUpdate(STATE_CITY);
     displayMaxRefresh.expire();
@@ -900,16 +898,4 @@ void loop() {
   }
 #endif
   updateDisplay(); // possibly update display if state has changed
-
-#if 0
-  if (touchDelay.isExpired()) {
-    touchDelay.restart();
-    Serial.print("A: ");
-    Serial.println(touchRead(T14));
-    Serial.print("B: ");
-    Serial.println(touchRead(T12));
-    Serial.print("C: ");
-    Serial.println(touchRead(T11));
-  }
-#endif
 }
