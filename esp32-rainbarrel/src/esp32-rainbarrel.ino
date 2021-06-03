@@ -18,6 +18,7 @@
 #include <ESPmDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
+#include <Wire.h>
 #include <Adafruit_NeoPixel.h>
 #include <Adafruit_ThinkInk.h>
 #include <Adafruit_MQTT.h>
@@ -31,12 +32,11 @@
 #include "coin.h"
 
 #ifdef RAIN_SERVER
-# include <Wire.h>
 # include <Adafruit_MotorShield.h>
 #endif
 #ifdef RAIN_CLIENT
 # include <HTTPClient.h>
-# include <Adafruit_MPR121.h>
+# include "MPR121.h"
 #endif
 
 #define SERVER_MDNS_NAME "rainpump"
@@ -151,7 +151,7 @@ AsyncDelay lastLevelReading = AsyncDelay(LEVEL_SENSOR_INTERVAL_SECS * 1000, Asyn
 AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 
-Adafruit_MPR121 capTouch = Adafruit_MPR121();
+MPR121 capTouch;
 boolean capPresent = false;
 #endif
 
@@ -351,7 +351,10 @@ void setup() {
   pinMode(LEVEL_SENSOR1_PIN, INPUT);
   pinMode(LEVEL_SENSOR2_PIN, INPUT);
   delay(100); // cap touch needs a moment!
-  capPresent = capTouch.begin(); // default I2C address for cap touch sensor
+  Wire.begin();
+  capTouch = MPR121(-1, false, 0x5A, false, true);
+  //capTouch.setThresholds(15,2);
+  capPresent = true;
   //capPresent = true;
 #endif
 
@@ -847,11 +850,13 @@ void loop() {
     button_press = BUTTON_D;
   }
 #ifdef RAIN_CLIENT
-  int touched = (capPresent && debounceDelay.isExpired()) ? capTouch.touched() : 0;
-  if (touched & (1<<0)) { button_press = BUTTON_A; }
-  else if (touched & (1<<1)) { button_press = BUTTON_B; }
-  else if (touched & (1<<2)) { button_press = BUTTON_C; }
-  else if (touched & (1<<3)) { button_press = BUTTON_D; }
+  if (debounceDelay.isExpired()) {
+     capTouch.readTouchInputs();
+     if (capTouch.touched(0)) { button_press = BUTTON_A; }
+     else if (capTouch.touched(1)) { button_press = BUTTON_B; }
+     else if (capTouch.touched(2)) { button_press = BUTTON_C; }
+     else if (capTouch.touched(3)) { button_press = BUTTON_D; }
+  }
 #endif
   if (button_press != 0) {
     debounceDelay.restart();
