@@ -44,7 +44,7 @@
 #define OTA_PASSWD "goaway"
 #define WATER_ALARM_LOW 100 /* 10% */
 #define KEEPALIVE_INTERVAL_SECS 60
-#define LEVEL_SENSOR_INTERVAL_SECS 300 // should be 1 eventually
+#define LEVEL_SENSOR_INTERVAL_SECS 1
 #define SERVER_PORT 80
 #define WATER_READING_ZERO 0
 #define WATER_READING_FULL 1024
@@ -145,11 +145,16 @@ AsyncDelay valveRunLength = AsyncDelay(60 * 1000, AsyncDelay::MILLIS);
 #endif
 
 #ifdef RAIN_CLIENT
-#define LEVEL_SENSOR1_PIN A1
+#define LEVEL_SENSOR1_PIN 2
 #define LEVEL_SENSOR2_PIN 10
 AsyncDelay lastLevelReading = AsyncDelay(LEVEL_SENSOR_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
 AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
+
+// at 2048, we're down to noise in the .04% of full scale range
+//    4096 is even better, of course, but response time lags
+#define LEVEL_SAMPLE_FILTER 128
+uint32_t level_accum[2] = { 0, 0 };
 
 MPR121 capTouch;
 boolean capPresent = false;
@@ -183,7 +188,9 @@ bool state_equal(SystemState *a, SystemState *b) {
     return false;
   }
   for (int i = 0; i < 2; i++) {
-    if (a->water_level[i] != b->water_level[i]) {
+    // we'll call them equal if they are "close enough" (aka 10 counts)
+    int diff = a->water_level[i] - b->water_level[i];
+    if (diff < -10 || diff > +10) {
       return false;
     }
   }
@@ -348,8 +355,10 @@ void setup() {
 #endif
 
 #ifdef RAIN_CLIENT
+  pinMode(A1, INPUT);
   pinMode(LEVEL_SENSOR1_PIN, INPUT);
   pinMode(LEVEL_SENSOR2_PIN, INPUT);
+  pinMode(A1, INPUT);
   delay(100); // cap touch needs a moment!
   Wire.begin();
   capTouch = MPR121(-1, false, 0x5A, false, true);
@@ -461,6 +470,12 @@ void setup() {
       Serial.println(serverBaseUrl);
     }
   }
+  level_accum[0] = 0;
+  level_accum[1] = 0;
+  for (int i=0; i<LEVEL_SAMPLE_FILTER; i++) {
+      level_accum[0] += analogRead(LEVEL_SENSOR1_PIN);
+      level_accum[1] += analogRead(LEVEL_SENSOR2_PIN);
+  }
 #endif
 
 #ifdef RAIN_SERVER
@@ -532,6 +547,7 @@ void updatePixels(int brightness) {
   pixels.show();
 }
 
+
 void updateState() {
   if (lightLevelDelay.isExpired()) {
     // make neopixel color match the user state
@@ -548,21 +564,39 @@ void updateState() {
     lightLevelDelay.restart();
   }
 #ifdef RAIN_CLIENT
+  level_accum[0] = ((uint64_t)level_accum[0] * (LEVEL_SAMPLE_FILTER-1) / LEVEL_SAMPLE_FILTER) + analogRead(LEVEL_SENSOR1_PIN);
+  level_accum[1] = ((uint64_t)level_accum[1] * (LEVEL_SAMPLE_FILTER-1) / LEVEL_SAMPLE_FILTER) + analogRead(LEVEL_SENSOR2_PIN);
   if (lastLevelReading.isExpired()) {
+    //int raw_level_0 = analogRead(LEVEL_SENSOR1_PIN);
+    //int raw_level_1 = analogRead(LEVEL_SENSOR2_PIN);
+    uint32_t raw_level_0 = level_accum[0] / LEVEL_SAMPLE_FILTER;
+    uint32_t raw_level_1 = level_accum[1] / LEVEL_SAMPLE_FILTER;
     // XXX read our level sensors
-    state.water_level[0] = random(WATER_ALARM_LOW+1, 1000); // analogRead(LEVEL_SENSOR1_PIN);
-    state.water_level[1] = random(WATER_ALARM_LOW+1, 1000); // analogRead(LEVEL_SENSOR2_PIN);
+    state.water_level[0] = raw_level_0 * 1000 / 8192;
+    state.water_level[1] = raw_level_1 * 1000 / 8192;
+    //state.water_level[0] = random(WATER_ALARM_LOW+1, 1000);
+    //state.water_level[1] = random(WATER_ALARM_LOW+1, 1000);
+    //state.water_level[0] = 360;
+    //state.water_level[1] = 630;
+    // XXX avoid cycling the valves in auto mode while we're testing
+    if (state.water_level[0] <= WATER_ALARM_LOW) {
+       state.water_level[0] = WATER_ALARM_LOW+1;
+    }
+    if (state.water_level[1] <= WATER_ALARM_LOW) {
+       state.water_level[1] = WATER_ALARM_LOW+1;
+    }
     lastLevelReading.restart();
+    // periodically send levels to AIO
+    if (waterLevelFeedDelay.isExpired() && mqtt.connected()) {
+       // publishing raw levels for now, for calibration purpoes
+       waterLevel1Feed.publish(raw_level_0/*state.water_level[0]*/);
+       waterLevel2Feed.publish(raw_level_1/*state.water_level[1]*/);
+       waterLevelFeedDelay.restart();
+    }
   }
   if (lastPing.isExpired() || !state_equal(&state, &last_xmit_state)) {
     // send our levels to the server via a GET request and update our copy of the server state
     sendUpdate();
-  }
-  // XXX periodically send levels to AIO
-  if (waterLevelFeedDelay.isExpired() && mqtt.connected()) {
-    waterLevel1Feed.publish(state.water_level[0]);
-    waterLevel2Feed.publish(state.water_level[1]);
-    waterLevelFeedDelay.restart();
   }
 #endif
 #ifdef RAIN_SERVER
@@ -688,7 +722,9 @@ void updateDisplay() {
   display.setTextSize(1);
   display.print(WiFi.localIP());
 #ifdef RAIN_CLIENT
+#if 0
   display.print(capPresent ? "+" : "-");
+#endif
 #endif
   display.setCursor(display.width() - 4, 17);
   rightjustify(MDNS_NAME ".local");
