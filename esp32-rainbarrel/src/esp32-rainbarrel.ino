@@ -48,7 +48,8 @@
 #define LEVEL_SENSOR_INTERVAL_SECS 1
 #define SERVER_PORT 80
 #define WATER_READING_ZERO 0
-#define WATER_READING_FULL 1024
+// rain barrel 1 max observed 17194 rain barrel 2 got up to 17414
+#define WATER_READING_FULL 17200
 
 #define EPD_DC      7 // can be any pin, but required!
 #define EPD_CS      8  // can be any pin, but required!
@@ -69,7 +70,7 @@ AsyncDelay lightLevelDelay = AsyncDelay(1*1000, AsyncDelay::MILLIS); // 1 Hz
 int lightLevel = 0;
 int lastBrightness = 0;
 
-AsyncDelay debounceDelay = AsyncDelay(500, AsyncDelay::MILLIS); // switch debounce
+AsyncDelay debounceDelay = AsyncDelay(250, AsyncDelay::MILLIS); // switch debounce
 
 // WiFiClientSecure for SSL/TLS support
 WiFiClientSecure client;
@@ -360,8 +361,14 @@ void setup() {
   pinMode(10, INPUT);
   delay(100); // cap touch needs a moment!
   Wire.begin();
+#if 0 /* auto config */
   capTouch = MPR121(-1, false, 0x5A, false, true);
-  //capTouch.setThresholds(15,2);
+#else
+  capTouch = MPR121(-1, false, 0x5A, false, false);
+  // TOU_THRESH=0x0A; REL_THRESH=0x0F
+  capTouch.setThresholds(10, 15);
+  capTouch.setThreshold(0, 16, 15); // button A has an itchy trigger
+#endif
   capPresent = true;
   //capPresent = true;
   ads1115.begin(0x48); // At default address
@@ -539,6 +546,7 @@ void sendUpdate(int new_user_state = -1) {
 #endif
 
 void updatePixels(int brightness) {
+#ifdef RAIN_SERVER
   pixels.setBrightness(brightness);
   if (state.active_state == STATE_CITY) {
     pixels.fill(0x0000FF);
@@ -546,6 +554,7 @@ void updatePixels(int brightness) {
     pixels.fill(0x00FF00);
   }
   pixels.show();
+#endif
 }
 
 
@@ -572,7 +581,14 @@ void updateState() {
     int32_t raw_level[2];
     for (int i=0; i<2; i++) {
       raw_level[i] = level_accum[i] / LEVEL_SAMPLE_FILTER;
-      state.water_level[i] = raw_level[i] * 1000 / 0x7FFF;
+      state.water_level[i] = (raw_level[i] - WATER_READING_ZERO) * 1000
+        / (WATER_READING_FULL - WATER_READING_ZERO);
+      if (state.water_level[i] < 0) {
+        state.water_level[i] = 0;
+      }
+      if (state.water_level[i] > 1000) {
+        state.water_level[i] = 1000;
+      }
       // XXX avoid cycling the valves in auto mode while we're testing
       if (state.water_level[i] <= WATER_ALARM_LOW) {
         state.water_level[i] = WATER_ALARM_LOW+1;
@@ -880,11 +896,27 @@ void loop() {
   }
 #ifdef RAIN_CLIENT
   if (debounceDelay.isExpired()) {
+     pixels.setBrightness(50);
+     pixels.fill(pixels.Color(32, 32, 32));
      capTouch.readTouchInputs();
-     if (capTouch.touched(0)) { button_press = BUTTON_A; }
-     else if (capTouch.touched(1)) { button_press = BUTTON_B; }
-     else if (capTouch.touched(2)) { button_press = BUTTON_C; }
-     else if (capTouch.touched(3)) { button_press = BUTTON_D; }
+     if (capTouch.touched(0)) {
+       button_press = BUTTON_A;
+       pixels.setPixelColor(3, 255, 0, 0);
+     }
+     if (capTouch.touched(1)) {
+       button_press = BUTTON_B;
+       pixels.setPixelColor(2, 0, 255, 0);
+     }
+     if (capTouch.touched(2)) {
+       button_press = BUTTON_C;
+       pixels.setPixelColor(1, 0, 0, 255);
+     }
+     if (capTouch.touched(3)) {
+       button_press = BUTTON_D;
+       pixels.setPixelColor(0, 255,255,255);
+     }
+     pixels.show();
+     button_press = 0; // XXX client button presses are flakey still!
   }
 #endif
   if (button_press != 0) {
@@ -903,9 +935,11 @@ void loop() {
     state.user_state = STATE_RAIN;
     start_audio();
   } else if (button_press == BUTTON_D) {
+#if 0
     // XXX for testing
     state.pipe_water_present = !state.pipe_water_present;
     state.connected_recently = !state.connected_recently;
+#endif
     start_audio();
   }
   updateState(); // read various sensors
@@ -915,17 +949,17 @@ void loop() {
   if (button_press == BUTTON_A) {
     sendUpdate(STATE_CITY);
     displayMaxRefresh.expire();
-    start_audio();
+    //start_audio();
   } else if (button_press == BUTTON_B) {
     sendUpdate(STATE_AUTO);
     displayMaxRefresh.expire();
-    start_audio();
+    //start_audio();
   } else if (button_press == BUTTON_C) {
     sendUpdate(STATE_RAIN);
     displayMaxRefresh.expire();
-    start_audio();
+    //start_audio();
   } else if (button_press == BUTTON_D) {
-    start_audio();
+    //start_audio();
     lastPing.expire();
   } else {
     updateState();
