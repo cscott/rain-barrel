@@ -37,6 +37,7 @@
 #ifdef RAIN_CLIENT
 # include <HTTPClient.h>
 # include "MPR121.h"
+# include <Adafruit_ADS1X15.h>
 #endif
 
 #define SERVER_MDNS_NAME "rainpump"
@@ -145,16 +146,15 @@ AsyncDelay valveRunLength = AsyncDelay(60 * 1000, AsyncDelay::MILLIS);
 #endif
 
 #ifdef RAIN_CLIENT
-#define LEVEL_SENSOR1_PIN 2
-#define LEVEL_SENSOR2_PIN 10
+Adafruit_ADS1115 ads1115;
 AsyncDelay lastLevelReading = AsyncDelay(LEVEL_SENSOR_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
 AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 
-// at 2048, we're down to noise in the .04% of full scale range
-//    4096 is even better, of course, but response time lags
+// It would really be nice if we could do this filtering on the analog
+// side instead of the digital side... (we tried!)
 #define LEVEL_SAMPLE_FILTER 128
-uint32_t level_accum[2] = { 0, 0 };
+int32_t level_accum[2] = { 0, 0 };
 
 MPR121 capTouch;
 boolean capPresent = false;
@@ -356,15 +356,16 @@ void setup() {
 
 #ifdef RAIN_CLIENT
   pinMode(A1, INPUT);
-  pinMode(LEVEL_SENSOR1_PIN, INPUT);
-  pinMode(LEVEL_SENSOR2_PIN, INPUT);
-  pinMode(A1, INPUT);
+  pinMode(2, INPUT);
+  pinMode(10, INPUT);
   delay(100); // cap touch needs a moment!
   Wire.begin();
   capTouch = MPR121(-1, false, 0x5A, false, true);
   //capTouch.setThresholds(15,2);
   capPresent = true;
   //capPresent = true;
+  ads1115.begin(0x48); // At default address
+  ads1115.setGain(GAIN_TWO); // +/-2.048V
 #endif
 
   // for light sensor
@@ -470,11 +471,11 @@ void setup() {
       Serial.println(serverBaseUrl);
     }
   }
-  level_accum[0] = 0;
-  level_accum[1] = 0;
-  for (int i=0; i<LEVEL_SAMPLE_FILTER; i++) {
-      level_accum[0] += analogRead(LEVEL_SENSOR1_PIN);
-      level_accum[1] += analogRead(LEVEL_SENSOR2_PIN);
+  for (int i=0; i<2; i++) {
+      level_accum[i] = 0;
+      for (int j=0; j<LEVEL_SAMPLE_FILTER; j++) {
+          level_accum[i] += ads1115.readADC_SingleEnded(i);
+      }
   }
 #endif
 
@@ -564,33 +565,25 @@ void updateState() {
     lightLevelDelay.restart();
   }
 #ifdef RAIN_CLIENT
-  level_accum[0] = ((uint64_t)level_accum[0] * (LEVEL_SAMPLE_FILTER-1) / LEVEL_SAMPLE_FILTER) + analogRead(LEVEL_SENSOR1_PIN);
-  level_accum[1] = ((uint64_t)level_accum[1] * (LEVEL_SAMPLE_FILTER-1) / LEVEL_SAMPLE_FILTER) + analogRead(LEVEL_SENSOR2_PIN);
+  for (int i=0; i<2; i++) {
+      level_accum[i] = ((int64_t)level_accum[i] * (LEVEL_SAMPLE_FILTER-1) / LEVEL_SAMPLE_FILTER) + ads1115.readADC_SingleEnded(i);
+  }
   if (lastLevelReading.isExpired()) {
-    //int raw_level_0 = analogRead(LEVEL_SENSOR1_PIN);
-    //int raw_level_1 = analogRead(LEVEL_SENSOR2_PIN);
-    uint32_t raw_level_0 = level_accum[0] / LEVEL_SAMPLE_FILTER;
-    uint32_t raw_level_1 = level_accum[1] / LEVEL_SAMPLE_FILTER;
-    // XXX read our level sensors
-    state.water_level[0] = raw_level_0 * 1000 / 8192;
-    state.water_level[1] = raw_level_1 * 1000 / 8192;
-    //state.water_level[0] = random(WATER_ALARM_LOW+1, 1000);
-    //state.water_level[1] = random(WATER_ALARM_LOW+1, 1000);
-    //state.water_level[0] = 360;
-    //state.water_level[1] = 630;
-    // XXX avoid cycling the valves in auto mode while we're testing
-    if (state.water_level[0] <= WATER_ALARM_LOW) {
-       state.water_level[0] = WATER_ALARM_LOW+1;
-    }
-    if (state.water_level[1] <= WATER_ALARM_LOW) {
-       state.water_level[1] = WATER_ALARM_LOW+1;
+    int32_t raw_level[2];
+    for (int i=0; i<2; i++) {
+      raw_level[i] = level_accum[i] / LEVEL_SAMPLE_FILTER;
+      state.water_level[i] = raw_level[i] * 1000 / 0x7FFF;
+      // XXX avoid cycling the valves in auto mode while we're testing
+      if (state.water_level[i] <= WATER_ALARM_LOW) {
+        state.water_level[i] = WATER_ALARM_LOW+1;
+      }
     }
     lastLevelReading.restart();
     // periodically send levels to AIO
     if (waterLevelFeedDelay.isExpired() && mqtt.connected()) {
        // publishing raw levels for now, for calibration purpoes
-       waterLevel1Feed.publish(raw_level_0/*state.water_level[0]*/);
-       waterLevel2Feed.publish(raw_level_1/*state.water_level[1]*/);
+       waterLevel1Feed.publish(raw_level[0]/*state.water_level[0]*/);
+       waterLevel2Feed.publish(raw_level[1]/*state.water_level[1]*/);
        waterLevelFeedDelay.restart();
     }
   }
