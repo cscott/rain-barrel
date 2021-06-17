@@ -230,7 +230,7 @@ void handleRoot() {
 
            "<html>\n"
 "  <head>\n"
-"    <meta http-equiv='refresh' content='5'/>\n"
+"    <meta http-equiv='refresh' content='10'/>\n"
 "    <title>Rainbarrel Pump Manager</title>\n"
 "    <style>\n"
 "      body { background-color: #fff; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\n"
@@ -241,6 +241,8 @@ void handleRoot() {
 "    <p>Uptime: %02d:%02d:%02d</p>\n"
 "    <p>User mode: %s %s %s</p>\n"
 "    <p>Active water source: %s</p>\n"
+"    <pre>%3d.%d%% %3d.%d%%</pre>\n"
+"    <p>Contacted recently by rain gauge: %s</p>\n"
 "    <img src=\"/test.svg\" />\n"
 "  </body>\n"
 "</html>",
@@ -249,7 +251,10 @@ void handleRoot() {
            state.user_state == STATE_CITY ? "<b>CITY</b>" : "<a href='/update?state=0'>city</a>",
            state.user_state == STATE_AUTO ? "<b>AUTO</b>" : "<a href='/update?state=1'>auto</a>",
            state.user_state == STATE_RAIN ? "<b>RAIN</b>" : "<a href='/update?state=2'>rain</a>",
-           state.active_state == STATE_CITY ? "City water" : "Rain barrels"
+           state.active_state == STATE_CITY ? "City water" : "Rain barrels",
+           state.water_level[0]/10, state.water_level[0]%10,
+           state.water_level[1]/10, state.water_level[1]%10,
+           state.connected_recently ? "Yes" : "No"
           );
   server.send(200, "text/html", temp);
 }
