@@ -169,13 +169,13 @@ AsyncDelay valveRunLength = AsyncDelay(60 * 1000, AsyncDelay::MILLIS);
 
 #ifdef RAIN_CLIENT
 Adafruit_ADS1115 ads1115;
-AsyncDelay lastLevelReading = AsyncDelay(15, AsyncDelay::MILLIS);
+AsyncDelay lastLevelReading = AsyncDelay(30, AsyncDelay::MILLIS);
 AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 
 // It would really be nice if we could do this filtering on the analog
 // side instead of the digital side... (we tried!)
-#define LEVEL_SAMPLE_FILTER 64
+#define LEVEL_SAMPLE_FILTER 16
 int32_t level_accum[2] = { 0, 0 };
 
 MPR121 capTouch;
