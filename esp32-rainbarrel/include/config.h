@@ -26,6 +26,7 @@
 
 #define WIFI_SSID "GriggsCorner"
 #define WIFI_PASS "lottedog"
+#define OTA_PASSWD "goaway"
 
 #if 0 // CSA: I'm using MQTT directly, not the adafruit io helpers
 
