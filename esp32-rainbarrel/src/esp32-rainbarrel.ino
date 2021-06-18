@@ -41,7 +41,6 @@
 
 #define SERVER_MDNS_NAME "rainpump"
 #define CLIENT_MDNS_NAME "raingauge"
-#define OTA_PASSWD "goaway"
 #define WATER_ALARM_LOW 100 /* 10% */
 #define KEEPALIVE_INTERVAL_SECS 60
 #define LEVEL_SENSOR_INTERVAL_SECS 1
