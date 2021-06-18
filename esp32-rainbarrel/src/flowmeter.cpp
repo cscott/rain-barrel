@@ -5,7 +5,7 @@
 
 #define LED_PIN 1
 #define TURBINE_PIN 5
-#define DEBOUNCE 10
+#define DEBOUNCE 16
 
 void requestEvent();
 
