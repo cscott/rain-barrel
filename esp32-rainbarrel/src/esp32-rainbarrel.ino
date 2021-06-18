@@ -1,11 +1,6 @@
-#ifdef RAIN_SERVER
-# ifdef RAIN_CLIENT
-#  error Can not define both RAIN_SERVER and RAIN_CLIENT, pick one!
-# endif
-#else
-# ifndef RAIN_CLIENT
-#  error Must defined either RAIN_SERVER or RAIN_CLIENT!
-# endif
+#if defined(RAIN_SERVER) || defined(RAIN_CLIENT)
+#if defined(RAIN_SERVER) && defined(RAIN_CLIENT)
+# error Can not define both RAIN_SERVER and RAIN_CLIENT, pick one!
 #endif
 
 #define MOTOR_DRIVER_CONNECTED
@@ -229,6 +224,8 @@ SystemState last_displayed_state = state;
 #ifdef RAIN_CLIENT
 SystemState last_xmit_state = state;
 #endif
+
+void updateState();
 
 void normalface() {
   display.setFont(&bluehigh12pt7b);
@@ -1002,3 +999,5 @@ void loop() {
 #endif
   updateDisplay(); // possibly update display if state has changed
 }
+
+#endif /* RAIN_SERVER || RAIN_CLIENT */
