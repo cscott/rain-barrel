@@ -16,6 +16,7 @@
 
 #include "config.h"
 #define MDNS_NAME "flowtester"
+#include "flowmeter.h"
 
 // Configuration of OLED display
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
@@ -30,6 +31,8 @@ Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
 #define LED_OFF 1 // active low
 #define LED_ON  0 // active low
 
+bool mdns_success;
+
 void normalText() {
   display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 }
@@ -41,7 +44,7 @@ void maybeInvertText(bool maybe) {
 }
 
 void setup() {
-  bool mdns_success;
+  Wire.begin();
   Serial.begin(115200);
 
   // Wifi Setup
@@ -127,9 +130,33 @@ void setup() {
   ArduinoOTA.begin();
 }
 
+void updateDisplay(uint64_t count) {
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.setTextSize(1);
+  invertText();
+  display.println("Flow meter tester");
+  normalText();
+  display.print("IP: ");
+  display.println(WiFi.localIP());
+  if (mdns_success) {
+      display.println("mDNS: " MDNS_NAME);
+  }
+  display.setTextSize(2);
+  display.println(count);
+  display.display();
+}
+
 void loop() {
     ArduinoOTA.handle();
     MDNS.update();
+
+    Wire.requestFrom(FLOWMETER_I2C_ADDR, 8);
+    uint64_t count = 0;
+    for (int i=0; Wire.available(); i++) {
+        count |= ((uint64_t)Wire.read()) << (8*i);
+    }
+    updateDisplay(count);
 }
 
 #endif /* FLOWTESTER */
