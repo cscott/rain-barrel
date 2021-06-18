@@ -368,11 +368,14 @@ void setup() {
   Wire.begin();
 #if 0 /* auto config */
   capTouch = MPR121(-1, false, 0x5A, false, true);
-#else
+#elif 0
   capTouch = MPR121(-1, false, 0x5A, false, false);
   // TOU_THRESH=0x0A; REL_THRESH=0x0F
   capTouch.setThresholds(10, 15);
   capTouch.setThreshold(0, 16, 15); // button A has an itchy trigger
+#else
+  capTouch = MPR121(-1, false, 0x5A, false, true);
+  // Adafruit defaults TOUCH_THRESHOLD_DEFAULT 12 RELEASE_THRESHOLD_DEFAULT 6
 #endif
   capPresent = true;
   //capPresent = true;
@@ -966,6 +969,7 @@ void loop() {
   } else if (button_press == BUTTON_D) {
     //start_audio();
     lastPing.expire();
+    displayMaxRefresh.expire(); // force refresh
   } else {
     updateState();
   }

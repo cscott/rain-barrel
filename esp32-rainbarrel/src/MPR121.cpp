@@ -112,8 +112,10 @@ void MPR121::init(byte _irqpin, boolean _useInterrupt, byte _address,
       touchTimes = NULL;
     }
 
+    if (irqpin >= 0) {
     pinMode(irqpin, INPUT);
     digitalWrite(irqpin, HIGH); //enable pullup resistor XXX: Is this needed with interrupts? TODO: Don't need if physical one present?
+    }
 
     if (useInterrupt) {
       /* Register the interrupt handler */
@@ -143,8 +145,10 @@ void MPR121::init(byte _irqpin, boolean _useInterrupt, byte _address,
   }
 
   // Setup the configuration mask
-  config_mask = 0x0C | // Enable all 12 electrodes
+  config_mask = 0x04 | // Enable only 4 electrodes // XXX CSA
+#ifdef ENABLE_PROXIMITY
                 0x30 | // enable proximity on all electrodes
+#endif
                 0x80;  // Baseline tracking is enabled with fast-start;
 
   initialized = true;
@@ -174,6 +178,7 @@ void MPR121::initialize(boolean auto_enabled) {
   // Clear registers for the case where the chip is being configured again
   // without the power being reset
   set_register(0x80, 0x63);
+  delay(1);
 
   disable();
 
@@ -190,6 +195,7 @@ void MPR121::initialize(boolean auto_enabled) {
   set_register(FDL_F, 0x02);
 
   // Set proximity sensing defaults
+#ifdef ENABLE_PROXIMITY
   set_register(MHDPROXR, 0xFF);
   set_register(NHDPROXR, 0xFF);
   set_register(NCLPROXR, 0x00);
@@ -201,6 +207,7 @@ void MPR121::initialize(boolean auto_enabled) {
   set_register(NHDPROXT, 0x00);
   set_register(NCLPROXT, 0x00);
   set_register(FDLPROXT, 0x00);
+#endif
 
   // Section C - Sets default touch and release thresholds for each electrode
   setThresholds(TOU_THRESH, REL_THRESH);
@@ -209,16 +216,15 @@ void MPR121::initialize(boolean auto_enabled) {
   // Set the Filter Configuration
   // Set ESI2
   set_register(FIL_CFG, 0x04);
-  
 
   // Section F
   // Enable Auto Config and auto Reconfig
   if (auto_enabled) {
     DEBUG2_PRINTLN("Auto-configure enabled");
     set_register(ATO_CFG0, 0x0B);
-    set_register(ATO_CFGU, 0xC9);  // USL = (Vdd-0.7)/vdd*256 = 0xC9 @3.3V
-    set_register(ATO_CFGL, 0x82);  // LSL = 0.65*USL = 0x82 @3.3V
-    set_register(ATO_CFGT, 0xB5);  // Target = 0.9*USL = 0xB5 @3.3V
+    set_register(ATO_CFGU, 0xCA);  // USL = (Vdd-0.7)/vdd*256 = 0xC9 @3.3V
+    set_register(ATO_CFGL, 0x83);  // LSL = 0.65*USL = 0x82 @3.3V
+    set_register(ATO_CFGT, 0xB6);  // Target = 0.9*USL = 0xB5 @3.3V
   }
 
   // Enable sensing
@@ -247,7 +253,7 @@ void MPR121::setThresholds(byte trigger, byte release) {
   disable(); // Must be in stop mode to write to registers
   for (byte i = 0; i < MPR121::MAX_SENSORS; i++) {
     set_register(ELE0_T + 2 * i, trigger);
-    set_register(ELE1_T + 2 * i, release);
+    set_register(ELE0_R + 2 * i, release);
   }
   enable(); // Return to previous config state
 }
