@@ -1,3 +1,4 @@
+#ifdef RAIN_CLIENT
 /*
  * Library for intacting with MPR121 12-channel capacitive touch sensors
  *
@@ -556,3 +557,4 @@ boolean MPR121_State::checkHeld(byte s) {
   return ((sensor_states[s] & SENSE_TOUCH) && !(sensor_states[s] & SENSE_CHANGE));
 }
 
+#endif
