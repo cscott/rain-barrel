@@ -616,7 +616,9 @@ void updateState() {
   }
 #ifdef RAIN_CLIENT
   if (lastLevelReading.isExpired()) {
-    lastLevelReading.restart();
+    // use .repeat() to ensure our filter bandwidth is relatively constant
+    // even if there's a (slow) display refresh between samples
+    lastLevelReading.repeat();
     int32_t raw_level[2];
     for (int i=0; i<2; i++) {
       level_accum[i] =
