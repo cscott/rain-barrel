@@ -29,15 +29,19 @@
 #include "bluehigh-12px.h"
 #include "bluebold-14px.h"
 #include "icons.h"
-#include "coin.h"
 
 #ifdef RAIN_SERVER
 # include <Adafruit_MotorShield.h>
+# define ENABLE_AUDIO
 #endif
 #ifdef RAIN_CLIENT
 # include <HTTPClient.h>
 # include "MPR121.h"
 # include <Adafruit_ADS1X15.h>
+#endif
+
+#ifdef ENABLE_AUDIO
+#include "coin.h"
 #endif
 
 #define SERVER_MDNS_NAME "rainpump"
@@ -63,20 +67,35 @@
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(4, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
 // 2.9in Grayscale Featherwing or Breakout:
 ThinkInk_290_Grayscale4_T5 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
-AsyncDelay displayMaxRefresh = AsyncDelay(24 * 60 * 60 * 1000, AsyncDelay::MILLIS); // once a day need it or not
+AsyncDelay displayMaxRefresh = AsyncDelay(4 * 60 * 60 * 1000, AsyncDelay::MILLIS); // 6x a day need it or not
 AsyncDelay displayMinRefresh = AsyncDelay(5 * 1000, AsyncDelay::MILLIS); // no more than once/five seconds
 
 AsyncDelay lightLevelDelay = AsyncDelay(1*1000, AsyncDelay::MILLIS); // 1 Hz
 int lightLevel = 0;
-int lastBrightness = 0;
+
+struct ButtonPress {
+  ButtonPress(): a(false), b(false), c(false), d(false) {}
+  boolean a : 1;
+  boolean b : 1;
+  boolean c : 1;
+  boolean d : 1;
+  bool operator==(const ButtonPress& rhs) const {
+    return a == rhs.a && b == rhs.b && c == rhs.c && d == rhs.d;
+  }
+};
+ButtonPress lastButtonPress;
 
 AsyncDelay debounceDelay = AsyncDelay(250, AsyncDelay::MILLIS); // switch debounce
+#ifdef RAIN_CLIENT
+AsyncDelay capReadInterval = AsyncDelay(50, AsyncDelay::MILLIS); // read @ 20Hz
+#endif
 
 // WiFiClientSecure for SSL/TLS support
 WiFiClientSecure client;
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
 AsyncDelay mqttDelay = AsyncDelay(5000, AsyncDelay::MILLIS); // retry every 5 seconds if not connected
+
 // io.adafruit.com root CA
 const char* adafruitio_root_ca = \
     "-----BEGIN CERTIFICATE-----\n" \
@@ -129,6 +148,8 @@ Adafruit_MQTT_Publish waterLevel2Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX
 # define MDNS_NAME CLIENT_MDNS_NAME
 #endif
 
+AsyncDelay connectionWatchdog = AsyncDelay(5*60*1000, AsyncDelay::MILLIS);
+
 #ifdef RAIN_SERVER
 #define WATER_GPIO 10
 // Motorshield configuration
@@ -148,17 +169,16 @@ AsyncDelay valveRunLength = AsyncDelay(60 * 1000, AsyncDelay::MILLIS);
 
 #ifdef RAIN_CLIENT
 Adafruit_ADS1115 ads1115;
-AsyncDelay lastLevelReading = AsyncDelay(LEVEL_SENSOR_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
+AsyncDelay lastLevelReading = AsyncDelay(15, AsyncDelay::MILLIS);
 AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 
 // It would really be nice if we could do this filtering on the analog
 // side instead of the digital side... (we tried!)
-#define LEVEL_SAMPLE_FILTER 128
+#define LEVEL_SAMPLE_FILTER 64
 int32_t level_accum[2] = { 0, 0 };
 
 MPR121 capTouch;
-boolean capPresent = false;
 #endif
 
 enum PumpState {
@@ -366,19 +386,10 @@ void setup() {
   pinMode(10, INPUT);
   delay(100); // cap touch needs a moment!
   Wire.begin();
-#if 0 /* auto config */
-  capTouch = MPR121(-1, false, 0x5A, false, true);
-#elif 0
-  capTouch = MPR121(-1, false, 0x5A, false, false);
-  // TOU_THRESH=0x0A; REL_THRESH=0x0F
-  capTouch.setThresholds(10, 15);
-  capTouch.setThreshold(0, 16, 15); // button A has an itchy trigger
-#else
   capTouch = MPR121(-1, false, 0x5A, false, true);
   // Adafruit defaults TOUCH_THRESHOLD_DEFAULT 12 RELEASE_THRESHOLD_DEFAULT 6
-#endif
-  capPresent = true;
-  //capPresent = true;
+  capTouch.setThresholds(8, 2);
+  capTouch.setThreshold(0, 20, 2); // button A has an itchy trigger
   ads1115.begin(0x48); // At default address
   ads1115.setGain(GAIN_TWO); // +/-2.048V
 #endif
@@ -392,9 +403,9 @@ void setup() {
   digitalWrite(NEOPIXEL_POWER, LOW); // on
 
   pixels.begin();
-  pixels.setBrightness(lastBrightness);
+  pixels.setBrightness(50);
   pixels.fill(0xFF00FF);
-  pixels.show(); // Initialize all pixels to 'off'
+  pixels.show(); // Show startup color
 
   display.begin(THINKINK_GRAYSCALE4);
   display.clearBuffer();
@@ -427,7 +438,9 @@ void setup() {
   ArduinoOTA.setHostname(MDNS_NAME);
 
   // No authentication by default
-  //ArduinoOTA.setPassword(OTA_PASSWD);
+#ifndef DEV_MODE
+  ArduinoOTA.setPassword(OTA_PASSWD);
+#endif
 
   // Password can be set with it's md5 value as well
   // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
@@ -514,6 +527,7 @@ void setup() {
   displayMaxRefresh.expire();
   displayMinRefresh.expire();
   lastPing.expire();
+  connectionWatchdog.restart();
 }
 
 #ifdef RAIN_CLIENT
@@ -544,6 +558,7 @@ void sendUpdate(int new_user_state = -1) {
       state.active_state = root["active_state"];
       state.pipe_water_present = root["pipe_water_present"];
       state.connected_recently = true;
+      connectionWatchdog.restart();
       Serial.printf("Got user_state %d\n", state.user_state);
     }
   }
@@ -553,27 +568,49 @@ void sendUpdate(int new_user_state = -1) {
 }
 #endif
 
-void updatePixels(int brightness) {
-#ifdef RAIN_SERVER
-  pixels.setBrightness(brightness);
-  if (state.active_state == STATE_CITY) {
-    pixels.fill(0x0000FF);
+void updatePixels() {
+  // Measured light levels:
+  // 8191 cloudy day outside (this is saturated)
+  // 5800 in my office during the daytime with the lights on (cloudy day)
+  // 4200 in my office during the daytime with the lights off (cloudy day)
+  // 1400-1500 in my office indoors at night
+  // 0 with my finger over it
+  pixels.setBrightness(50);
+  if (lightLevel < 2000) {
+    // white backlight for readability at night
+    pixels.fill(pixels.Color(32, 32, 32));
+  } else if (state.active_state == STATE_CITY) {
+    pixels.fill(pixels.Color(0, 0, 64));
   } else {
-    pixels.fill(0x00FF00);
+    pixels.fill(pixels.Color(0, 64, 0));
+  }
+  if (lastButtonPress.a) {
+    pixels.setPixelColor(3, 255, 0, 0);
+  }
+  if (lastButtonPress.b) {
+    pixels.setPixelColor(2, 0, 255, 0);
+  }
+  if (lastButtonPress.c) {
+    pixels.setPixelColor(1, 0, 0, 255);
+  }
+  if (lastButtonPress.d) {
+    pixels.setPixelColor(0, 255,255,255);
   }
   pixels.show();
-#endif
 }
 
 
 void updateState() {
   if (lightLevelDelay.isExpired()) {
-    // make neopixel color match the user state
-    updatePixels(0);  // turn off the backlight for a true reading of ambient
+    // turn off the backlight for a true reading of ambient
+    pixels.setBrightness(0);
+    pixels.fill(0);
+    pixels.show();
 
     lightLevel = analogRead(LIGHT_SENSOR);
 
-    updatePixels(lastBrightness);
+    // turn the pixels back on (at appropriate brightness!)
+    updatePixels();
 
     if (lightLevelFeedDelay.isExpired() && mqtt.connected()) {
       lightLevelFeed.publish(lightLevel);
@@ -582,12 +619,13 @@ void updateState() {
     lightLevelDelay.restart();
   }
 #ifdef RAIN_CLIENT
-  for (int i=0; i<2; i++) {
-      level_accum[i] = ((int64_t)level_accum[i] * (LEVEL_SAMPLE_FILTER-1) / LEVEL_SAMPLE_FILTER) + ads1115.readADC_SingleEnded(i);
-  }
   if (lastLevelReading.isExpired()) {
+    lastLevelReading.restart();
     int32_t raw_level[2];
     for (int i=0; i<2; i++) {
+      level_accum[i] =
+        ((int64_t)level_accum[i] * (LEVEL_SAMPLE_FILTER-1) / LEVEL_SAMPLE_FILTER)
+        + ads1115.readADC_SingleEnded(i);
       raw_level[i] = level_accum[i] / LEVEL_SAMPLE_FILTER;
       state.water_level[i] = (raw_level[i] - WATER_READING_ZERO) * 1000
         / (WATER_READING_FULL - WATER_READING_ZERO);
@@ -597,18 +635,19 @@ void updateState() {
       if (state.water_level[i] > 1000) {
         state.water_level[i] = 1000;
       }
+#ifdef DEV_MODE
       // XXX avoid cycling the valves in auto mode while we're testing
       if (state.water_level[i] <= WATER_ALARM_LOW) {
         state.water_level[i] = WATER_ALARM_LOW+1;
       }
+#endif
     }
-    lastLevelReading.restart();
     // periodically send levels to AIO
     if (waterLevelFeedDelay.isExpired() && mqtt.connected()) {
-       // publishing raw levels for now, for calibration purpoes
-       waterLevel1Feed.publish(raw_level[0]/*state.water_level[0]*/);
-       waterLevel2Feed.publish(raw_level[1]/*state.water_level[1]*/);
-       waterLevelFeedDelay.restart();
+      // publishing raw levels for now, for calibration purpoes
+      waterLevel1Feed.publish(raw_level[0]/*state.water_level[0]*/);
+      waterLevel2Feed.publish(raw_level[1]/*state.water_level[1]*/);
+      waterLevelFeedDelay.restart();
     }
   }
   if (lastPing.isExpired() || !state_equal(&state, &last_xmit_state)) {
@@ -695,30 +734,10 @@ void rightjustify(const char *str) {
 }
 
 void updateDisplay() {
-  // Adjust NeoPixel brightness
-  // Measured light levels:
-  // 8191 cloudy day outside (this is saturated)
-  // 5800 in my office during the daytime with the lights on (cloudy day)
-  // 4200 in my office during the daytime with the lights off (cloudy day)
-  // 1400-1500 in my office indoors at night
-  // 0 with my finger over it
-  int newBrightness = 50;
-#if 0
-  if (lightLevel < 1000 || lightLevel > 2000) { // XXX is this the right relationship?
-    newBrightness = 255;
-  }
-#endif
-  if (newBrightness != lastBrightness) {
-    lastBrightness = newBrightness;
-    updatePixels(lastBrightness);
-  }
   // eInk display update
   if (state_equal(&state, &last_displayed_state) && !displayMaxRefresh.isExpired()) {
     return; // don't update if nothing has changed
   }
-
-  // make neopixel color match the user state
-  updatePixels(lastBrightness);
 
   if (!displayMinRefresh.isExpired()) {
     return; // don't update too frequently
@@ -726,6 +745,9 @@ void updateDisplay() {
   displayMinRefresh.restart();
   displayMaxRefresh.restart();
   last_displayed_state = state;
+
+  // make neopixel color match the user state
+  updatePixels();
 
   boolean client_connected_recently = true;
 #ifdef RAIN_CLIENT
@@ -738,11 +760,6 @@ void updateDisplay() {
   display.setCursor(4, 17);
   display.setTextSize(1);
   display.print(WiFi.localIP());
-#ifdef RAIN_CLIENT
-#if 0
-  display.print(capPresent ? "+" : "-");
-#endif
-#endif
   display.setCursor(display.width() - 4, 17);
   rightjustify(MDNS_NAME ".local");
 
@@ -853,6 +870,7 @@ void updateDisplay() {
   display.display(); // or partial update?
 }
 
+#ifdef ENABLE_AUDIO
 uint32_t audio_pointer = 0;
 bool audio_playing = false;
 AsyncDelay audioDelay = AsyncDelay(1000000L / SAMPLE_RATE, AsyncDelay::MICROS);
@@ -875,13 +893,20 @@ void play_audio() {
     dacWrite(A0, audio[audio_pointer++]);
   }
 }
+#endif /* ENABLE_AUDIO */
 
 void loop() {
+#ifdef ENABLE_AUDIO
   if (audio_playing) {
     play_audio();
     return;
   }
+#endif
   ArduinoOTA.handle();
+  if (connectionWatchdog.isExpired()) {
+    delay(5000);
+    ESP.restart();
+  }
   if ((!mqtt.connected()) && mqttDelay.isExpired()) {
     int ret = mqtt.connect();
     if (ret != 0) {
@@ -890,84 +915,85 @@ void loop() {
     mqttDelay.restart();
   }
   // Update user state via buttons
-  int button_press = 0;
+  ButtonPress button_press;
   if (!debounceDelay.isExpired()) {
-    // suppress button presses while debouncing
-  } else if (! digitalRead(BUTTON_A)) {
-    button_press = BUTTON_A;
-  } else if (! digitalRead(BUTTON_B)) {
-    button_press = BUTTON_B;
-  } else if (! digitalRead(BUTTON_C)) {
-    button_press = BUTTON_C;
-  } else if (! digitalRead(BUTTON_D)) {
-    button_press = BUTTON_D;
-  }
+    // don't process additional button presses while debouncing
+  } else {
+    if (! digitalRead(BUTTON_A)) {
+      button_press.a = true;
+    }
+    if (! digitalRead(BUTTON_B)) {
+      button_press.b = true;
+    }
+    if (! digitalRead(BUTTON_C)) {
+      button_press.c = true;
+    }
+    if (! digitalRead(BUTTON_D)) {
+      button_press.d = true;
+    }
 #ifdef RAIN_CLIENT
-  if (debounceDelay.isExpired()) {
-     pixels.setBrightness(50);
-     pixels.fill(pixels.Color(32, 32, 32));
-     capTouch.readTouchInputs();
-     if (capTouch.touched(0)) {
-       button_press = BUTTON_A;
-       pixels.setPixelColor(3, 255, 0, 0);
-     }
-     if (capTouch.touched(1)) {
-       button_press = BUTTON_B;
-       pixels.setPixelColor(2, 0, 255, 0);
-     }
-     if (capTouch.touched(2)) {
-       button_press = BUTTON_C;
-       pixels.setPixelColor(1, 0, 0, 255);
-     }
-     if (capTouch.touched(3)) {
-       button_press = BUTTON_D;
-       pixels.setPixelColor(0, 255,255,255);
-     }
-     pixels.show();
-     button_press = 0; // XXX client button presses are flakey still!
-  }
+    if (capReadInterval.isExpired()) { // don't clog up the I2C
+      capReadInterval.restart();
+      capTouch.readTouchInputs();
+      if (capTouch.touched(0)) {
+        button_press.a = true;
+      }
+      if (capTouch.touched(1)) {
+        button_press.b = true;
+      }
+      if (capTouch.touched(2)) {
+        button_press.c = true;
+      }
+      if (capTouch.touched(3)) {
+        button_press.d = true;
+      }
+    } else {
+      button_press = lastButtonPress;
+    }
 #endif
-  if (button_press != 0) {
-    debounceDelay.restart();
+    if (!(lastButtonPress == button_press)) {
+      updatePixels(); // show button press!
+    }
+    lastButtonPress = button_press;
+    if (button_press.a || button_press.b || button_press.c || button_press.d) {
+      debounceDelay.restart();
+#ifdef ENABLE_AUDIO
+      start_audio();
+#endif
+    }
   }
 #ifdef RAIN_SERVER
   server.handleClient();
+  if (WiFi.isConnected()) {
+    connectionWatchdog.restart();
+  }
   // Update user state via buttons
-  if (button_press == BUTTON_A) {
+  if (button_press.a) {
     state.user_state = STATE_CITY;
-    start_audio();
-  } else if (button_press == BUTTON_B) {
+  } else if (button_press.b) {
     state.user_state = STATE_AUTO;
-    start_audio();
-  } else if (button_press == BUTTON_C) {
+  } else if (button_press.c) {
     state.user_state = STATE_RAIN;
-    start_audio();
-  } else if (button_press == BUTTON_D) {
-#if 0
-    // XXX for testing
-    state.pipe_water_present = !state.pipe_water_present;
-    state.connected_recently = !state.connected_recently;
-#endif
-    start_audio();
+  } else if (button_press.d) {
+    /* no function in server */
   }
   updateState(); // read various sensors
 #endif
 #ifdef RAIN_CLIENT
   // read buttons, if pressed immediately sent a ?state= request to the server and expire lastPing()
-  if (button_press == BUTTON_A) {
+#if 1 // def DEV_MODE
+  button_press = ButtonPress(); // XXX getting sensitivity right
+#endif
+  if (button_press.a) {
     sendUpdate(STATE_CITY);
     displayMaxRefresh.expire();
-    //start_audio();
-  } else if (button_press == BUTTON_B) {
+  } else if (button_press.b) {
     sendUpdate(STATE_AUTO);
     displayMaxRefresh.expire();
-    //start_audio();
-  } else if (button_press == BUTTON_C) {
+  } else if (button_press.c) {
     sendUpdate(STATE_RAIN);
     displayMaxRefresh.expire();
-    //start_audio();
-  } else if (button_press == BUTTON_D) {
-    //start_audio();
+  } else if (button_press.d) {
     lastPing.expire();
     displayMaxRefresh.expire(); // force refresh
   } else {
