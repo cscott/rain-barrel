@@ -143,8 +143,8 @@
 #define START_ADDRESS 0x5A
 
 // Default touch and release thresholds
-#define TOU_THRESH 0x0A
-#define	REL_THRESH 0x0F
+#define TOU_THRESH 0x0F
+#define	REL_THRESH 0x0A
 
 class MPR121
 {
