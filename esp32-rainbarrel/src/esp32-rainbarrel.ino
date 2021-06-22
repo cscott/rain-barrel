@@ -27,7 +27,7 @@
 
 #ifdef RAIN_SERVER
 # include <Adafruit_MotorShield.h>
-# define ENABLE_AUDIO
+//# define ENABLE_AUDIO
 #endif
 #ifdef RAIN_CLIENT
 # include <HTTPClient.h>
@@ -968,6 +968,9 @@ void loop() {
   if (WiFi.isConnected()) {
     connectionWatchdog.restart();
   }
+#if 1 // XXX the buttons got wet :(
+  button_press = ButtonPress();
+#endif
   // Update user state via buttons
   if (button_press.a) {
     state.user_state = STATE_CITY;
