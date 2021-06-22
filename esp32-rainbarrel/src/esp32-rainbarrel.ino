@@ -4,6 +4,7 @@
 #endif
 
 #define MOTOR_DRIVER_CONNECTED
+#undef FLOWMETER_CONNECTED
 #undef DEV_MODE // shorter delays for easier development
 
 #include <WiFi.h>
@@ -27,6 +28,7 @@
 
 #ifdef RAIN_SERVER
 # include <Adafruit_MotorShield.h>
+# include "flowmeter.h"
 //# define ENABLE_AUDIO
 #endif
 #ifdef RAIN_CLIENT
@@ -49,6 +51,11 @@
 // (old) rain barrel 1 max observed 17194 rain barrel 2 got up to 17414
 // (new adc) around 26000 seems to be full, measured up to 29342 in testing
 #define WATER_READING_FULL 26000
+// From datasheet: "Frequency(Hz) = (8.1Q) -3 +/- 10% where Q is L/min"
+// So if G(gallons/min) = Q/3.78541
+// 1 gal/s = 60 gal/min = 227.1246 L/min => 1839.7-3 ~= 1837Hz
+// We count both transitions, so 3673.4 ticks per gallon.
+#define TICKS_PER_GALLON 3673.4
 
 #define EPD_DC      7 // can be any pin, but required!
 #define EPD_CS      8  // can be any pin, but required!
@@ -160,6 +167,10 @@ AsyncDelay lastPing = AsyncDelay(3 * KEEPALIVE_INTERVAL_SECS * 1000, AsyncDelay:
 // run the valve for a minute when it changes state.
 int lastValveState = -1;
 AsyncDelay valveRunLength = AsyncDelay(60 * 1000, AsyncDelay::MILLIS);
+
+uint64_t lastFlowMeterReading = 0;
+AsyncDelay flowMeterInterval = AsyncDelay(60 * 1000, AsyncDelay::MILLIS);
+Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "irrigation-flow");
 #endif
 
 #ifdef RAIN_CLIENT
@@ -348,6 +359,18 @@ void drawGraph() {
 
   server.send(200, "image/svg+xml", out);
 }
+
+uint64_t readFlowMeter() {
+    uint64_t count = 0;
+#ifdef FLOWMETER_CONNECTED
+    Wire.requestFrom(FLOWMETER_I2C_ADDR, 8);
+    for (int i=0; Wire.available(); i++) {
+        count |= ((uint64_t)Wire.read()) << (8*i);
+    }
+#endif
+    return count;
+}
+
 #endif
 
 void setup() {
@@ -367,6 +390,7 @@ void setup() {
 
 #ifdef RAIN_SERVER
   pinMode(WATER_GPIO, INPUT_PULLDOWN);
+  Wire.begin();
 #ifdef MOTOR_DRIVER_CONNECTED
   // Motorshield Setup
   AFMS.begin();
@@ -517,6 +541,7 @@ void setup() {
   MDNS.addService("http", "tcp", SERVER_PORT);
   Serial.println("HTTP server started");
   valveRunLength.restart(); // run the valve to move it
+  lastFlowMeterReading = readFlowMeter();
 #endif
 
   Serial.println("Ready");
@@ -656,6 +681,17 @@ void updateState() {
   }
 #endif
 #ifdef RAIN_SERVER
+  // read flow meter at intervals
+  if (flowMeterInterval.isExpired()) {
+    flowMeterInterval.repeat();
+    if (mqtt.connected()) {
+      uint64_t newFlow = readFlowMeter();
+      double gallons = (newFlow - lastFlowMeterReading) / (double)TICKS_PER_GALLON;
+      if (flowMeterFeed.publish(gallons)) {
+        lastFlowMeterReading = newFlow;
+      }
+    }
+  }
   // read our pipe water sensor
   state.pipe_water_present = !digitalRead(WATER_GPIO);
 
