@@ -46,8 +46,9 @@
 #define LEVEL_SENSOR_INTERVAL_SECS 1
 #define SERVER_PORT 80
 #define WATER_READING_ZERO 0
-// rain barrel 1 max observed 17194 rain barrel 2 got up to 17414
-#define WATER_READING_FULL 17200
+// (old) rain barrel 1 max observed 17194 rain barrel 2 got up to 17414
+// (new adc) around 26000 seems to be full, measured up to 29342 in testing
+#define WATER_READING_FULL 26000
 
 #define EPD_DC      7 // can be any pin, but required!
 #define EPD_CS      8  // can be any pin, but required!
@@ -254,6 +255,7 @@ void handleRoot() {
 "  </head>\n"
 "  <body>\n"
 "    <h1>Rainbarrel Pump Manager</h1>\n"
+"    <p><a href='https://io.adafruit.com/cscott/dashboards/griggs-corner-rain-barrels?kiosk=true'>Dashboard</a></p>\n"
 "    <p>Uptime: %02d:%02d:%02d</p>\n"
 "    <p>User mode: %s %s %s</p>\n"
 "    <p>Active water source: %s</p>\n"
