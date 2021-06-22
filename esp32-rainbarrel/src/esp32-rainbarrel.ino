@@ -949,11 +949,14 @@ void loop() {
       button_press = lastButtonPress;
     }
 #endif
-    if (!(lastButtonPress == button_press)) {
+    bool buttons_pressed =
+      button_press.a || button_press.b || button_press.c || button_press.d;
+    bool buttons_changed = !(lastButtonPress == button_press);
+    lastButtonPress = button_press;
+    if (buttons_changed) {
       updatePixels(); // show button press!
     }
-    lastButtonPress = button_press;
-    if (button_press.a || button_press.b || button_press.c || button_press.d) {
+    if (buttons_pressed) {
       debounceDelay.restart();
 #ifdef ENABLE_AUDIO
       start_audio();
