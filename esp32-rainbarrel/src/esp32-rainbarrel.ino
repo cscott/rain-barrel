@@ -4,7 +4,7 @@
 #endif
 
 #define MOTOR_DRIVER_CONNECTED
-#undef FLOWMETER_CONNECTED
+#define FLOWMETER_CONNECTED
 #undef DEV_MODE // shorter delays for easier development
 
 #include <WiFi.h>
@@ -35,6 +35,7 @@
 # include <HTTPClient.h>
 # include "MPR121.h"
 # include <Adafruit_ADS1X15.h>
+# define DISABLE_BUTTONS // sensitivity needs adjustment
 #endif
 
 #ifdef ENABLE_AUDIO
@@ -49,8 +50,8 @@
 #define SERVER_PORT 80
 #define WATER_READING_ZERO 0
 // (old) rain barrel 1 max observed 17194 rain barrel 2 got up to 17414
-// (new adc) around 26000 seems to be full, measured up to 29342 in testing
-#define WATER_READING_FULL 26000
+// (new adc) around 32000 seems to be full, measured up to 32751 in testing
+#define WATER_READING_FULL 32000
 // From datasheet: "Frequency(Hz) = (8.1Q) -3 +/- 10% where Q is L/min"
 // So if G(gallons/min) = Q/3.78541
 // 1 gal/s = 60 gal/min = 227.1246 L/min => 1839.7-3 ~= 1837Hz
@@ -175,13 +176,14 @@ Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "
 
 #ifdef RAIN_CLIENT
 Adafruit_ADS1115 ads1115;
-AsyncDelay lastLevelReading = AsyncDelay(30, AsyncDelay::MILLIS);
+AsyncDelay lastLevelReading = AsyncDelay(100, AsyncDelay::MILLIS);
 AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 
 // It would really be nice if we could do this filtering on the analog
 // side instead of the digital side... (we tried!)
-#define LEVEL_SAMPLE_FILTER 16
+// Actually - one of our sensors is much noisier than the other! HW issue?
+#define LEVEL_SAMPLE_FILTER 4
 int32_t level_accum[2] = { 0, 0 };
 
 MPR121 capTouch;
@@ -542,6 +544,7 @@ void setup() {
   Serial.println("HTTP server started");
   valveRunLength.restart(); // run the valve to move it
   lastFlowMeterReading = readFlowMeter();
+  flowMeterInterval.restart(); // next read the flow meter in a minute
 #endif
 
   Serial.println("Ready");
@@ -1006,7 +1009,7 @@ void loop() {
   if (WiFi.isConnected()) {
     connectionWatchdog.restart();
   }
-#if 1 // XXX the buttons got wet :(
+#ifdef DISABLE_BUTTONS
   button_press = ButtonPress();
 #endif
   // Update user state via buttons
@@ -1023,8 +1026,8 @@ void loop() {
 #endif
 #ifdef RAIN_CLIENT
   // read buttons, if pressed immediately sent a ?state= request to the server and expire lastPing()
-#if 1 // def DEV_MODE
-  button_press = ButtonPress(); // XXX getting sensitivity right
+#ifdef DISABLE_BUTTONS
+  button_press = ButtonPress();
 #endif
   if (button_press.a) {
     sendUpdate(STATE_CITY);
