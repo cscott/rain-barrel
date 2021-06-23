@@ -690,7 +690,8 @@ void updateState() {
     if (mqtt.connected()) {
       uint64_t newFlow = readFlowMeter();
       double gallons = (newFlow - lastFlowMeterReading) / (double)TICKS_PER_GALLON;
-      if (flowMeterFeed.publish(gallons)) {
+      // don't fill the log with a lot of unnecessary zeroes
+      if (newFlow != lastFlowMeterReading && flowMeterFeed.publish(gallons)) {
         lastFlowMeterReading = newFlow;
       }
     }
