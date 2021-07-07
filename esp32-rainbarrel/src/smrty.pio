@@ -1,0 +1,56 @@
+.program smrty
+
+; Keep a timer running every 4 cycles; record transition times in the FIFO
+
+LwaitH:
+    jmp y-- next1
+next1:
+    jmp pin ishigh
+    jmp LwaitH [1]
+ishigh:
+    in y, 32 [1]
+HwaitL:
+    jmp y-- next2
+next2:
+    jmp pin notlow
+islow:
+    in y, 32
+    jmp LwaitH
+notlow:
+    jmp HwaitL [1]
+
+% c-sdk {
+static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
+    pio_sm_config c = smrty_program_get_default_config(offset);
+
+    // Map the state machine's JMP pin group to the `pin`
+    // parameter to this function.
+    sm_config_set_in_pins(&c, pin); // for WAIT
+    sm_config_set_jmp_pin(&c, pin); // for JMP
+    // Set this pin's GPIO function (connect PIO to the pad)
+    pio_gpio_init(pio, pin);
+    // Set the pin direction to input at the PIO
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
+    // auto-push enabled
+    sm_config_set_in_shift(&c, false, true, 32);
+    // deeper fifo as we're not doing any TX
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    // one clock per 4 execution cycles
+    int cycles_per_sample = 4;
+    float div = clock_get_hz(clk_sys) / (freq * cycles_per_sample);
+    sm_config_set_clkdiv(&c, div);
+
+    // Load our configuration, and jump to the start of the program
+    pio_sm_init(pio, sm, offset, &c);
+
+    // set y to 0 before beginning.
+    pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
+    // since this starts in the "low waiting for high" state, wait for low
+    // before beginning the program.
+    pio_sm_exec(pio, sm, pio_encode_wait_pin(0/*polarity*/, 0/*pin*/));
+
+    // Set the state machine running
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
