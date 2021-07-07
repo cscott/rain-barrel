@@ -1,7 +1,9 @@
 #ifdef FLOWTESTER
+#define SNITCH_TESTER // also used to test the I2C on the snitch!
 #include "Arduino.h"
 #include <Wire.h>
 #include "flowmeter.h"
+#include "smrtysnitch.h"
 
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
@@ -151,7 +153,11 @@ void loop() {
     ArduinoOTA.handle();
     MDNS.update();
 
+#ifdef SNITCH_TESTER
+    Wire.requestFrom(SNITCH_I2C_ADDR, 8);
+#else
     Wire.requestFrom(FLOWMETER_I2C_ADDR, 8);
+#endif
     uint64_t count = 0;
     for (int i=0; Wire.available(); i++) {
         count |= ((uint64_t)Wire.read()) << (8*i);
