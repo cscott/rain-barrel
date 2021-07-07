@@ -1,0 +1,42 @@
+Capture theory:
+Just use one PIO peripheral which times edge transitions
+ -- we could even make it easier and only look for positive-going transitions
+
+"Search for start":
+  Read transitions, look for four in a row where period is 19.2kHz +/- 10%
+  Use time of last of these as N
+"Look for phase reversal"
+  Compute Si = N+(0.5+i)*(1/19.2kHz).  These are center times for
+  subsequent "chips"
+  Either use the PIO "sample at N" machine or just keep reading
+  transitions (we need both up and down transitions here) and watch
+  for 010xx010 pattern. (invert this?)
+  Use the Si for the start (end) of this pattern when found to compute
+  M = Si + (0.5 + C) * (1/19.2kHz)
+  This is the start of first bit time.
+"Read bytes"
+  For 8*8 bits:
+  Compute start time for bit #i:
+  B[i] = M + (i//8)*(1/60Hz) + (i%8)*(10/19.2kHz)
+  Starting at time B[i] + 1/19.2Khz and stopping at B[i] + 9/19.2kHz,
+  read transitions and look for four in a row where period is 19.2kHz +/- 10%
+  If found, bit #i is 1 else 0
+"Finish up"
+  Assemble bits, bit#0 is LSB, compute checksum. If valid, then store.
+  (tag w/ current time?) (or set a flag which is cleared when buffer
+  is read?)
+
+Use other PIO to autonomously respond to I2C in slave mode? Can use
+DMA from a ring buffer, no processor intervention necessary.
+
+But we can also DMA the transition times into a buffer and decode
+async.
+
+Debugging:
+We can use a PIO machine which dumps X bits of data on GPIO pins at
+exactly time Y in order to trace the operation of the decoder above.
+Ie, when we compute N send a debugging command to put "1h" on the GPIO
+at time N+1/19.2khZ, or send `i` out the GPIO at every computed Si
+time, and `i` out at every computed B[i] time.  (or dump the decoded
+bit #i out at time B[i] + 10/19.2kHz so we can compare the decoded
+bits to the observed waveform).
