@@ -3,7 +3,10 @@
 #include "Arduino.h"
 #include <Wire.h>
 #include "flowmeter.h"
-#include "smrtysnitch.h"
+#ifdef SNITCH_TESTER
+# include "smrtysnitch.h"
+# include "smrty_decode.h"
+#endif
 
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
@@ -18,7 +21,6 @@
 
 #include "config.h"
 #define MDNS_NAME "flowtester"
-#include "flowmeter.h"
 
 // Configuration of OLED display
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
@@ -132,7 +134,19 @@ void setup() {
   ArduinoOTA.begin();
 }
 
-void updateDisplay(uint64_t count) {
+void printHex(uint8_t num) {
+    char buf[3];
+    snprintf(buf, sizeof(buf), "%02X", (int)num);
+    display.print(buf);
+}
+
+void updateDisplay(
+#ifdef SNITCH_TESTER
+                   uint8_t *buf
+#else
+                   uint64_t count
+#endif
+) {
   display.clearDisplay();
   display.setCursor(0,0);
   display.setTextSize(1);
@@ -144,8 +158,19 @@ void updateDisplay(uint64_t count) {
   if (mdns_success) {
       display.println("mDNS: " MDNS_NAME);
   }
+#ifdef SNITCH_TESTER
+  display.print("Seq "); printHex(buf[0]); display.println();
+  for (int i=0; i<3; i++) {
+      for (int j=0; j<8; j++) {
+          display.print(" ");
+          printHex(buf[8*i + j + 1]);
+      }
+      display.println();
+  }
+#else
   display.setTextSize(2);
   display.println(count);
+#endif
   display.display();
 }
 
@@ -154,15 +179,20 @@ void loop() {
     MDNS.update();
 
 #ifdef SNITCH_TESTER
-    Wire.requestFrom(SNITCH_I2C_ADDR, 8);
+    Wire.requestFrom(SNITCH_I2C_ADDR, 1 + (8*3));
+    uint8_t buf[1+(8*3)];
+    for (int i=0; Wire.available(); i++) {
+        buf[i] = Wire.read();
+    }
+    updateDisplay(buf);
 #else
     Wire.requestFrom(FLOWMETER_I2C_ADDR, 8);
-#endif
     uint64_t count = 0;
     for (int i=0; Wire.available(); i++) {
         count |= ((uint64_t)Wire.read()) << (8*i);
     }
     updateDisplay(count);
+#endif
 }
 
 #endif /* FLOWTESTER */
