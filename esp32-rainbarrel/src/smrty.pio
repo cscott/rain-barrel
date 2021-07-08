@@ -21,6 +21,36 @@ islow:
     in y, 32
 .wrap
 
+; push the (synchronized) timer value to the FIFO if the pin is idle
+; (which in this case is high) too long (0x0800 0000 counts)
+.program watchdog
+public start:
+notidle:
+    jmp y-- next3
+next3:
+    jmp pin newly_idle
+    jmp notidle
+
+    ; start of loop counting cycles that the pin is high
+resetx:
+    jmp y-- next4
+next4:
+    ; set x to 0x0800 0000, which is 27s
+    ; this is actually the smallest large number we can set!
+    set x,16
+    mov x,::x
+keep_going:
+    jmp y-- next5
+next5:
+    jmp pin stillidle
+    jmp notidle
+stillidle:
+    jmp x-- keep_going
+    jmp y-- next6
+next6:
+    in y, 32 ; inform our host that we've timed out!
+newly_idle:
+    jmp resetx
 
 % c-sdk {
 static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
@@ -39,7 +69,7 @@ static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, f
     // deeper fifo as we're not doing any TX
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
-    // one clock per 4 execution cycles
+    // one clock per 3 execution cycles
     int cycles_per_sample = 3;
     float div = clock_get_hz(clk_sys) / (freq * cycles_per_sample);
     sm_config_set_clkdiv(&c, div);
@@ -49,11 +79,39 @@ static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, f
 
     // set y to 0 before beginning.
     pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
-    // since this starts in the "low waiting for high" state, wait for low
-    // before beginning the program.
-    pio_sm_exec(pio, sm, pio_encode_wait_pin(0/*polarity*/, 0/*pin*/));
 
-    // Set the state machine running
-    pio_sm_set_enabled(pio, sm, true);
+    // We're deliberately not starting the state machine; we're going
+    // to do that in sync w/ the watchdog program in the caller.
+}
+
+static inline void watchdog_program_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
+    pio_sm_config c = watchdog_program_get_default_config(offset);
+
+    // Map the state machine's JMP pin group to the `pin`
+    // parameter to this function.
+    sm_config_set_in_pins(&c, pin); // for WAIT
+    sm_config_set_jmp_pin(&c, pin); // for JMP
+    // Set this pin's GPIO function (connect PIO to the pad)
+    pio_gpio_init(pio, pin);
+    // Set the pin direction to input at the PIO
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
+    // auto-push enabled
+    sm_config_set_in_shift(&c, false, true, 32);
+    // deeper fifo as we're not doing any TX
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    // one clock per 3 execution cycles
+    int cycles_per_sample = 3;
+    float div = clock_get_hz(clk_sys) / (freq * cycles_per_sample);
+    sm_config_set_clkdiv(&c, div);
+
+    // Load our configuration, and jump to the start of the program
+    pio_sm_init(pio, sm, offset + watchdog_offset_start, &c);
+
+    // set y to 0 before beginning.
+    pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
+
+    // We're deliberately not starting the state machine; we're going
+    // to do that in sync w/ the smrty program in the caller.
 }
 %}

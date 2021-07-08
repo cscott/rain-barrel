@@ -42,6 +42,47 @@ static inline pio_sm_config smrty_program_get_default_config(uint offset) {
     sm_config_set_wrap(&c, offset + smrty_wrap_target, offset + smrty_wrap);
     return c;
 }
+#endif
+
+// -------- //
+// watchdog //
+// -------- //
+
+#define watchdog_wrap_target 0
+#define watchdog_wrap 12
+
+#define watchdog_offset_start 0u
+
+static const uint16_t watchdog_program_instructions[] = {
+            //     .wrap_target
+    0x0081, //  0: jmp    y--, 1                     
+    0x00cc, //  1: jmp    pin, 12                    
+    0x0000, //  2: jmp    0                          
+    0x0084, //  3: jmp    y--, 4                     
+    0xe030, //  4: set    x, 16                      
+    0xa031, //  5: mov    x, ::x                     
+    0x0087, //  6: jmp    y--, 7                     
+    0x00c9, //  7: jmp    pin, 9                     
+    0x0000, //  8: jmp    0                          
+    0x0046, //  9: jmp    x--, 6                     
+    0x008b, // 10: jmp    y--, 11                    
+    0x4040, // 11: in     y, 32                      
+    0x0003, // 12: jmp    3                          
+            //     .wrap
+};
+
+#if !PICO_NO_HARDWARE
+static const struct pio_program watchdog_program = {
+    .instructions = watchdog_program_instructions,
+    .length = 13,
+    .origin = -1,
+};
+
+static inline pio_sm_config watchdog_program_get_default_config(uint offset) {
+    pio_sm_config c = pio_get_default_sm_config();
+    sm_config_set_wrap(&c, offset + watchdog_wrap_target, offset + watchdog_wrap);
+    return c;
+}
 
 static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
     pio_sm_config c = smrty_program_get_default_config(offset);
@@ -57,7 +98,7 @@ static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, f
     sm_config_set_in_shift(&c, false, true, 32);
     // deeper fifo as we're not doing any TX
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
-    // one clock per 4 execution cycles
+    // one clock per 3 execution cycles
     int cycles_per_sample = 3;
     float div = clock_get_hz(clk_sys) / (freq * cycles_per_sample);
     sm_config_set_clkdiv(&c, div);
@@ -65,11 +106,33 @@ static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, f
     pio_sm_init(pio, sm, offset + smrty_offset_start, &c);
     // set y to 0 before beginning.
     pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
-    // since this starts in the "low waiting for high" state, wait for low
-    // before beginning the program.
-    pio_sm_exec(pio, sm, pio_encode_wait_pin(0/*polarity*/, 0/*pin*/));
-    // Set the state machine running
-    pio_sm_set_enabled(pio, sm, true);
+    // We're deliberately not starting the state machine; we're going
+    // to do that in sync w/ the watchdog program in the caller.
+}
+static inline void watchdog_program_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
+    pio_sm_config c = watchdog_program_get_default_config(offset);
+    // Map the state machine's JMP pin group to the `pin`
+    // parameter to this function.
+    sm_config_set_in_pins(&c, pin); // for WAIT
+    sm_config_set_jmp_pin(&c, pin); // for JMP
+    // Set this pin's GPIO function (connect PIO to the pad)
+    pio_gpio_init(pio, pin);
+    // Set the pin direction to input at the PIO
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
+    // auto-push enabled
+    sm_config_set_in_shift(&c, false, true, 32);
+    // deeper fifo as we're not doing any TX
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+    // one clock per 3 execution cycles
+    int cycles_per_sample = 3;
+    float div = clock_get_hz(clk_sys) / (freq * cycles_per_sample);
+    sm_config_set_clkdiv(&c, div);
+    // Load our configuration, and jump to the start of the program
+    pio_sm_init(pio, sm, offset + watchdog_offset_start, &c);
+    // set y to 0 before beginning.
+    pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
+    // We're deliberately not starting the state machine; we're going
+    // to do that in sync w/ the smrty program in the caller.
 }
 
 #endif
