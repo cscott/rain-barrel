@@ -12,27 +12,28 @@
 // smrty //
 // ----- //
 
-#define smrty_wrap_target 0
-#define smrty_wrap 8
+#define smrty_wrap_target 1
+#define smrty_wrap 7
+
+#define smrty_offset_start 1u
 
 static const uint16_t smrty_program_instructions[] = {
+    0x0005, //  0: jmp    5                          
             //     .wrap_target
-    0x0081, //  0: jmp    y--, 1                     
-    0x00c3, //  1: jmp    pin, 3                     
-    0x0100, //  2: jmp    0                      [1] 
-    0x4140, //  3: in     y, 32                  [1] 
-    0x0085, //  4: jmp    y--, 5                     
-    0x00c8, //  5: jmp    pin, 8                     
-    0x4040, //  6: in     y, 32                      
-    0x0000, //  7: jmp    0                          
-    0x0104, //  8: jmp    4                      [1] 
+    0x0082, //  1: jmp    y--, 2                     
+    0x00c4, //  2: jmp    pin, 4                     
+    0x0001, //  3: jmp    1                          
+    0x4040, //  4: in     y, 32                      
+    0x0086, //  5: jmp    y--, 6                     
+    0x00c0, //  6: jmp    pin, 0                     
+    0x4040, //  7: in     y, 32                      
             //     .wrap
 };
 
 #if !PICO_NO_HARDWARE
 static const struct pio_program smrty_program = {
     .instructions = smrty_program_instructions,
-    .length = 9,
+    .length = 8,
     .origin = -1,
 };
 
@@ -57,11 +58,11 @@ static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, f
     // deeper fifo as we're not doing any TX
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
     // one clock per 4 execution cycles
-    int cycles_per_sample = 4;
+    int cycles_per_sample = 3;
     float div = clock_get_hz(clk_sys) / (freq * cycles_per_sample);
     sm_config_set_clkdiv(&c, div);
     // Load our configuration, and jump to the start of the program
-    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_init(pio, sm, offset + smrty_offset_start, &c);
     // set y to 0 before beginning.
     pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
     // since this starts in the "low waiting for high" state, wait for low
