@@ -1,23 +1,26 @@
 .program smrty
 
-; Keep a timer running every 4 cycles; record transition times in the FIFO
+; Keep a timer running every 3 cycles; record transition times in the FIFO
 
+notlow:
+    jmp HwaitL
+public start:
 LwaitH:
+.wrap_target
     jmp y-- next1
 next1:
     jmp pin ishigh
-    jmp LwaitH [1]
+    jmp LwaitH
 ishigh:
-    in y, 32 [1]
+    in y, 32
 HwaitL:
     jmp y-- next2
 next2:
     jmp pin notlow
 islow:
     in y, 32
-    jmp LwaitH
-notlow:
-    jmp HwaitL [1]
+.wrap
+
 
 % c-sdk {
 static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
@@ -37,12 +40,12 @@ static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, f
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
     // one clock per 4 execution cycles
-    int cycles_per_sample = 4;
+    int cycles_per_sample = 3;
     float div = clock_get_hz(clk_sys) / (freq * cycles_per_sample);
     sm_config_set_clkdiv(&c, div);
 
     // Load our configuration, and jump to the start of the program
-    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_init(pio, sm, offset + smrty_offset_start, &c);
 
     // set y to 0 before beginning.
     pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0));
