@@ -2,8 +2,7 @@
 #include "smrty_decode.h"
 
 void test_decode(void) {
-    // cheating!
-    TEST_ASSERT_EQUAL(0, 0);
+    TEST_ASSERT_EQUAL(8, sizeof(struct smrty_msg));
 }
 
 int main(int argc, char **argv) {
