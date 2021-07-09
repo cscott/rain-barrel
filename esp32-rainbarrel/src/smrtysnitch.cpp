@@ -38,6 +38,8 @@ void requestEvent();
 void setup() {
   // initialize the digital pin as an output.
   pinMode(LED_BUILTIN, OUTPUT);
+  memset(i2c_buffer, 0, sizeof(i2c_buffer));
+
   Wire.begin(SNITCH_I2C_ADDR); // join i2c bus with address
   Wire.onRequest(requestEvent); // register event
 

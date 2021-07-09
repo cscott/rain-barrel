@@ -162,8 +162,16 @@ void updateDisplay(
   display.print("Seq "); printHex(buf[0]); display.println();
   for (int i=0; i<3; i++) {
       for (int j=0; j<8; j++) {
-          display.print(" ");
+          if (j==1||j==4||j==6||j==7) { display.print(" "); }
           printHex(buf[8*i + j + 1]);
+      }
+      // verify checksum
+      uint8_t checksum=0;
+      for (int j=0; j<7; j++) {
+          checksum += buf[8*i + j + 1];
+      }
+      if (checksum != buf[8+i + 7 + 1]) {
+          display.print("*");
       }
       display.println();
   }
@@ -181,6 +189,7 @@ void loop() {
 #ifdef SNITCH_TESTER
     Wire.requestFrom(SNITCH_I2C_ADDR, 1 + (8*3));
     uint8_t buf[1+(8*3)];
+    memset(buf, 0xFF, sizeof(buf));
     for (int i=0; Wire.available(); i++) {
         buf[i] = Wire.read();
     }
