@@ -1,30 +1,62 @@
 #!/usr/bin/python3
 import math
 
-thresholdValue = 1.5
+statistics=False
+headerFile=False
+
+# files and thresholds
+
+#filename='../snitch-capture-20210706-export/analog.csv'
+#thresholdValue = 1.5
+
+#filename='../snitch-capture-20210708a-export/analog.csv'
+#thresholdValue = 0.3
+
+#filename='../snitch-capture-20210708b-export/digital.csv'
+#thresholdValue = 0.5
+
+#filename='../snitch-capture-20210708c-export/analog.csv'
+#thresholdValue = 2.7
+
+
 frequency = 19200 * 256
 
 maxValue = -1000
 minValue = 1000
+avgSum = 0
+avgCount = 0
 
 lastTime = None
 lastValue = None
-with open('../snitch-capture-20210706-export/analog.csv', 'r') as file:
+
+if headerFile and not statistics:
+    print("uint32_t timer_data[] = {");
+with open(filename, 'r') as file:
     file.readline() # throw away header
     while file:
         line = file.readline()
         if line == '': break
         line = line.split(',')
         seconds,level = float(line[0]), float(line[1])
-        maxValue = max(level, maxValue)
-        minValue = min(level, minValue)
         isHigh = (level > thresholdValue)
         timerCount = math.floor(seconds*frequency)
-        if lastValue is None or (lastValue != isHigh and timerCount!=lastTime):
-            #print(timerCount,1 if isHigh else 0)
-            print(timerCount)
-            #print (maxValue,minValue)
+        if statistics:
+            maxValue = max(level, maxValue)
+            minValue = min(level, minValue)
+            avgSum += level
+            avgCount += 1
+        elif lastValue is None or (lastValue != isHigh and timerCount!=lastTime):
+            if headerFile:
+                print("\t", timerCount, ",");
+            else:
+                #print(timerCount,1 if isHigh else 0)
+                print(timerCount, ",")
             lastValue = isHigh
             lastTime = timerCount
-#print("Max:", maxValue)
-#print("Min:", minValue)
+
+if statistics:
+    print("Max:", maxValue)
+    print("Min:", minValue)
+    print("Avg:", avgSum/avgCount)
+elif headerFile:
+    print("}");
