@@ -17,9 +17,11 @@ struct smrty_msg msg;
 
 enum decode_state {
     INITIAL,
-    LOOKING_FOR_BEEP,
+    LOOKING_FOR_LONG_CHIRP,
+    LOOKING_FOR_SHORT_CHIRP,
     LOOKING_FOR_PHASE_REVERSAL,
     LOOKING_FOR_BIT,
+    LOOKING_FOR_BIT_SHORT_CHIRP,
 };
 
 struct smrty_msg *process_transition(uint32_t cycle_count) {
@@ -28,12 +30,12 @@ struct smrty_msg *process_transition(uint32_t cycle_count) {
     uint32_t interval = (cycle_count - last_transition);
 
 // GOOD_PROLOGUE should be odd so we're measuring pos-pos or neg-neg
+// (also so we're measuring long-long (if there are short cycles)
 #define GOOD_PROLOGUE 7 // look for 3 1/2 cycles
     static uint8_t num_chirps = 0;
     static uint32_t chirp_centers[GOOD_PROLOGUE];
     static uint32_t next_chip;
     static uint32_t chip_pattern;
-    static uint8_t chip_level;
     static uint32_t start_byte0;
     static uint8_t bit_count;
     static uint8_t *resultPtr;
@@ -43,16 +45,28 @@ struct smrty_msg *process_transition(uint32_t cycle_count) {
 
     switch(state) {
     case INITIAL:
-        state = LOOKING_FOR_BEEP;
+        state = LOOKING_FOR_LONG_CHIRP;
         num_chirps = 0;
+        // fall through to set last_transition to allow us to compute interval
+        // in next state.
         break;
-    case LOOKING_FOR_BEEP:
-        // Look for a good # of transitions in a row where the period is 19.2kHz
-        // +/- 10%.  There's going to be noise around the edges, ignore that.
-        if (interval < (COUNTS_PER_HALFCYCLE*9/10) ||
-            interval > (COUNTS_PER_HALFCYCLE*11/10)) {
-            break; // not a beep
+    case LOOKING_FOR_LONG_CHIRP:
+    case LOOKING_FOR_SHORT_CHIRP:
+        if (state==LOOKING_FOR_SHORT_CHIRP) {
+            if (interval < (COUNTS_PER_HALFCYCLE*4/10) ||
+                interval > (COUNTS_PER_HALFCYCLE*11/10)) {
+                break; // not a chirp
+            }
+            state = LOOKING_FOR_LONG_CHIRP; // not two short chirps in a row
+        } else if (interval < (COUNTS_PER_HALFCYCLE*9/10) ||
+                   interval > (COUNTS_PER_HALFCYCLE*16/10)) {
+            // not a chirp
+            break;
+        } else if (interval > (COUNTS_PER_HALFCYCLE*11/10)) {
+            // make sure the next one is not also a long chirp
+            state = LOOKING_FOR_SHORT_CHIRP;
         }
+        // this is a chirp, whee!
         chirp_centers[num_chirps++] = cycle_count - (interval/2);
         if (num_chirps!=GOOD_PROLOGUE) {
             // We haven't seen enough chirps yet
@@ -69,7 +83,9 @@ struct smrty_msg *process_transition(uint32_t cycle_count) {
         }
         // oh, this is good!  Let's look for the phase reversal!
         state = LOOKING_FOR_PHASE_REVERSAL;
-        next_chip = chirp_centers[GOOD_PROLOGUE-1] + COUNTS_PER_HALFCYCLE;
+        // Use the penultimate chirp to define the center, which will be the
+        // narrower chirp in a long/short/long train
+        next_chip = chirp_centers[GOOD_PROLOGUE-2] + COUNTS_PER_CYCLE;
         chip_pattern = 0; // bit 0 is arbitrary, could be 1
 #ifdef DEBUGGING
         printf("Found chirp, last interval (%lf - %lf)\n",
@@ -113,7 +129,14 @@ struct smrty_msg *process_transition(uint32_t cycle_count) {
         }
         chip_pattern = chip_pattern ^ 1;
         break;
+    // NOTE: we could get stuck in the LOOKING_FOR_BIT state for a loong
+    // time if there is no transition after the last next_chip time.  We
+    // have a separate watchdog that feeds in transitions when the input
+    // is idle in order to get us unstuck. (In practice we get a lot of
+    // noise when the xmitter is shut down as well, which usually ensures
+    // some spurious transitions.)
     case LOOKING_FOR_BIT:
+    case LOOKING_FOR_BIT_SHORT_CHIRP:
     restart_bit:
         // fixme: could get stuck if last transition is to low?
         // we want to ensure we get a transition every second or so
@@ -150,9 +173,19 @@ struct smrty_msg *process_transition(uint32_t cycle_count) {
         //printf("Interval %lld at %lld\n", (long long) interval, cycle_count);
 #endif
         // is this interval a chirp?
-        if (interval < (COUNTS_PER_HALFCYCLE*9/10) ||
-            interval > (COUNTS_PER_HALFCYCLE*11/10)) {
-            break; // not a chirp
+        if (state==LOOKING_FOR_BIT_SHORT_CHIRP) {
+            if (interval < (COUNTS_PER_HALFCYCLE*4/10) ||
+                interval > (COUNTS_PER_HALFCYCLE*11/10)) {
+                break; // not a chirp
+            }
+            state = LOOKING_FOR_BIT; // not two short chirps in a row
+        } else if (interval < (COUNTS_PER_HALFCYCLE*9/10) ||
+                   interval > (COUNTS_PER_HALFCYCLE*16/10)) {
+            // not a chirp
+            break;
+        } else if (interval > (COUNTS_PER_HALFCYCLE*11/10)) {
+            // make sure the next one is not also a long chirp
+            state = LOOKING_FOR_BIT_SHORT_CHIRP;
         }
         // this is a chirp, whee!
         num_chirps++;

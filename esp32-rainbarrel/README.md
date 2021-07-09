@@ -14,7 +14,7 @@ See:
 For the SMRT-Y decoder test:
 
  pio run -e native
- .pio/build/native/program test/test_desktop/sample-input.txt
+ .pio/build/native/program test/test_desktop/sample-20210706.h
 
 (The `sample-input.txt` file was created from the Saleae CSV export of the
 comparator channel with the `boildown.py` script.)
