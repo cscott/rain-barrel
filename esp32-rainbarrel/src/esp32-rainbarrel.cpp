@@ -7,6 +7,7 @@
 #define FLOWMETER_CONNECTED
 #undef DEV_MODE // shorter delays for easier development
 
+#include "Arduino.h"
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
