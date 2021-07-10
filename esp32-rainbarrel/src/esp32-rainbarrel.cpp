@@ -30,6 +30,8 @@
 #ifdef RAIN_SERVER
 # include <Adafruit_MotorShield.h>
 # include "flowmeter.h"
+# include "smrtysnitch.h"
+# include "smrty_decode.h"
 //# define ENABLE_AUDIO
 #endif
 #ifdef RAIN_CLIENT
@@ -171,8 +173,15 @@ int lastValveState = -1;
 AsyncDelay valveRunLength = AsyncDelay(60 * 1000, AsyncDelay::MILLIS);
 
 uint64_t lastFlowMeterReading = 0;
+bool lastFlowMeterReadingValid = false;
 AsyncDelay flowMeterInterval = AsyncDelay(60 * 1000, AsyncDelay::MILLIS);
 Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "irrigation-flow");
+
+// Eventually we'll have feeds for the parsed ground temp and water %
+// but for now dump the raw messages
+Adafruit_MQTT_Publish smrtyFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-raw");
+AsyncDelay smrtyInterval = AsyncDelay(10 * 1000, AsyncDelay::MILLIS);
+uint8_t smrtyLastSeqno = 0xFF;
 #endif
 
 #ifdef RAIN_CLIENT
@@ -363,15 +372,86 @@ void drawGraph() {
   server.send(200, "image/svg+xml", out);
 }
 
-uint64_t readFlowMeter() {
+bool readFlowMeter(uint64_t *result) {
     uint64_t count = 0;
 #ifdef FLOWMETER_CONNECTED
-    Wire.requestFrom(FLOWMETER_I2C_ADDR, 8);
-    for (int i=0; Wire.available(); i++) {
+    uint8_t nBytes = Wire.requestFrom(FLOWMETER_I2C_ADDR, 8);
+    for (int i=0; Wire.available() > 0 && i<8; i++) {
         count |= ((uint64_t)Wire.read()) << (8*i);
     }
+    while (Wire.available() > 0) {
+        Wire.read();
+    }
+    *result = count;
+    return (nBytes >= 8);
 #endif
-    return count;
+    return false;
+}
+
+bool readSmrtySnitch(uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8_t *good_checksum) {
+    Wire.beginTransmission(SNITCH_I2C_ADDR);
+    Wire.write(which);
+    uint8_t status = Wire.endTransmission();
+    if (status != 0) {
+        return false; // no response from client, must be disconnected
+    }
+    uint8_t reg, nBytes;
+    do {
+        nBytes = Wire.requestFrom(SNITCH_I2C_ADDR, 10);
+        if (nBytes == 0) {
+            return false; /* unexpected! */
+        }
+        reg = Wire.read();
+    } while (reg != which);  // busy loop until reg. write is done
+    if (nBytes < 10) {
+        return false; /* incomplete read for some reason */
+    }
+    *seqno = Wire.read();
+    uint8_t checksum = 0;
+    uint8_t *p = (uint8_t*)msg;
+    for (int i=0; i<8; i++, p++) {
+        *p = Wire.read();
+        if (i<7) {
+            checksum += *p;
+        }
+    }
+    *good_checksum = (checksum == msg->checksum) ? 1 : 0;
+    return true;
+}
+
+void publishSmrty(uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
+    const char *fmt = "[%02X] %02X %02X %02X %02X | %02X %02X %02X | %02X%s";
+    char buf[strlen(fmt)+1]; // string will be shorter than this
+    snprintf(buf, strlen(fmt)+1, fmt, seqno,
+             msg->addr, msg->cmd, msg->tx_data1, msg->tx_data2,
+             msg->rx_data1, msg->rx_data2, msg->status,
+             msg->checksum, good_checksum ? "":"*");
+    smrtyFeed.publish(buf);
+}
+
+bool pollSmrtySnitch(void) {
+    struct smrty_msg read_msgs[SNITCH_BUFFER_SIZE];
+    uint8_t read_seqno[SNITCH_BUFFER_SIZE];
+    uint8_t read_good_checksum[SNITCH_BUFFER_SIZE];
+    bool status;
+    int i;
+    for (i=0; i<SNITCH_BUFFER_SIZE; i++) {
+        status = readSmrtySnitch(i, &read_seqno[i], &read_msgs[i], &read_good_checksum[i]);
+        if (!status) {
+            return false; // communications error, bail.
+        }
+        if (read_seqno[i] == 0xFF /* uninitialized */ ||
+            read_seqno[i] == smrtyLastSeqno) {
+            // we found one we already transmitted, don't need to fetch more
+            break;
+        }
+    }
+    // ok, transmit up to item i.
+    for (--i; i>=0; i--) {
+        publishSmrty(read_seqno[i], &read_msgs[i], read_good_checksum[i]);
+        smrtyLastSeqno = read_seqno[i];
+    }
+    return true;
 }
 
 #endif
@@ -544,7 +624,7 @@ void setup() {
   MDNS.addService("http", "tcp", SERVER_PORT);
   Serial.println("HTTP server started");
   valveRunLength.restart(); // run the valve to move it
-  lastFlowMeterReading = readFlowMeter();
+  lastFlowMeterReadingValid = readFlowMeter(&lastFlowMeterReading);
   flowMeterInterval.restart(); // next read the flow meter in a minute
 #endif
 
@@ -689,13 +769,28 @@ void updateState() {
   if (flowMeterInterval.isExpired()) {
     flowMeterInterval.repeat();
     if (mqtt.connected()) {
-      uint64_t newFlow = readFlowMeter();
-      double gallons = (newFlow - lastFlowMeterReading) / (double)TICKS_PER_GALLON;
-      // don't fill the log with a lot of unnecessary zeroes
-      if (newFlow != lastFlowMeterReading && flowMeterFeed.publish(gallons)) {
-        lastFlowMeterReading = newFlow;
-      }
+        uint64_t newFlow;
+        bool valid = readFlowMeter(&newFlow);
+        if (!valid) {
+            lastFlowMeterReadingValid = false;
+        } else if (!lastFlowMeterReadingValid) {
+            lastFlowMeterReading = newFlow;
+            lastFlowMeterReadingValid = true;
+        } else {
+            double gallons = (newFlow - lastFlowMeterReading) / (double)TICKS_PER_GALLON;
+            // don't fill the log with a lot of unnecessary zeroes
+            if (newFlow != lastFlowMeterReading && flowMeterFeed.publish(gallons)) {
+                lastFlowMeterReading = newFlow;
+            }
+        }
     }
+  }
+  // read the SMRTY snitch at interval
+  if (smrtyInterval.isExpired()) {
+      smrtyInterval.restart();
+      if (mqtt.connected()) {
+          pollSmrtySnitch();
+      }
   }
   // read our pipe water sensor
   state.pipe_water_present = !digitalRead(WATER_GPIO);

@@ -28,11 +28,11 @@ uint smrty_sm, watchdog_sm;
 uint8_t seqno = 0;
 
 // i2c message buffer
-#define BUFFER_DEPTH 8
+#define SNITCH_BUFFER_SIZE 8
 struct buffer {
     uint8_t seqno;
     struct smrty_msg msg;
-} i2c_buffer[BUFFER_DEPTH];
+} i2c_buffer[SNITCH_BUFFER_SIZE];
 
 #ifdef DEBUGGING
 static uint32_t longcount = 0;
@@ -55,7 +55,7 @@ void setup() {
 #ifdef DEBUGGING
   gpio_pull_up(SMRTY_GPIO_PIN);
 #endif
-  for (int i=0; i<BUFFER_DEPTH; i++) {
+  for (int i=0; i<SNITCH_BUFFER_SIZE; i++) {
       i2c_buffer[i].seqno = 0xFF;
   }
 
@@ -112,7 +112,7 @@ void loop() {
     }
     mutex_enter_blocking(&msg_lock);
     memmove(&(i2c_buffer[1]), &(i2c_buffer[0]),
-            sizeof(i2c_buffer[0])*(BUFFER_DEPTH-1));
+            sizeof(i2c_buffer[0])*(SNITCH_BUFFER_SIZE-1));
     i2c_buffer[0].seqno = seqno++;
     memmove(&(i2c_buffer[0].msg), msg, sizeof(*msg));
     // roll over after 7 bits so that we can use 0xFF to indicate 'not here'
@@ -147,7 +147,7 @@ void requestEvent() {
     if (mutex_try_enter(&msg_lock, NULL)) {
         // library has a 256 byte buffer, so this should be safe.
         // (ie, it shouldn't block)
-        uint8_t idx = (register_requested % BUFFER_DEPTH);
+        uint8_t idx = (register_requested % SNITCH_BUFFER_SIZE);
         Wire.write(register_requested);
         Wire.write(&(i2c_buffer[idx].seqno), 1);
         Wire.write((uint8_t*)&(i2c_buffer[idx].msg), 8);
