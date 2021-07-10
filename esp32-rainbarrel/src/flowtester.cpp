@@ -2,6 +2,7 @@
 #define SNITCH_TESTER // also used to test the I2C on the snitch!
 #include "Arduino.h"
 #include <Wire.h>
+#include <AsyncDelay.h>
 #include "flowmeter.h"
 #ifdef SNITCH_TESTER
 # include "smrtysnitch.h"
@@ -35,6 +36,8 @@ Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
 #define LED_OFF 1 // active low
 #define LED_ON  0 // active low
 
+AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
+bool blinkWasOn = false;
 bool mdns_success;
 
 void normalText() {
@@ -69,7 +72,11 @@ void setup() {
   display.setCursor(0,0);
 
   invertText();
+#ifdef SNITCH_TESTER
+  display.println("SMRT-Y snitch tester");
+#else
   display.println("Flow meter tester");
+#endif
   normalText();
 
   display.println("");
@@ -142,7 +149,7 @@ void printHex(uint8_t num) {
 
 void updateDisplay(
 #ifdef SNITCH_TESTER
-                   uint8_t *buf
+                   uint8_t *buf, bool goodComm
 #else
                    uint64_t count
 #endif
@@ -159,18 +166,31 @@ void updateDisplay(
       display.println("mDNS: " MDNS_NAME);
   }
 #ifdef SNITCH_TESTER
-  display.print("Seq "); printHex(buf[0]); display.println();
+  display.print("Seq ");
+  printHex(buf[0]);
+  display.print(" ");
+  printHex(buf[9]);
+  display.print(" ");
+  printHex(buf[18]);
+  if (goodComm) {
+      display.print(blinkWasOn ? "" : " .");
+      blinkWasOn = !blinkWasOn;
+  } else {
+      display.print(" X");
+  }
+  display.println();
+
   for (int i=0; i<3; i++) {
       for (int j=0; j<8; j++) {
-          if (j==1||j==4||j==6||j==7) { display.print(" "); }
-          printHex(buf[8*i + j + 1]);
+          if (j==1||j==4||j==6) { display.print(" "); }
+          printHex(buf[9*i + j + 1]);
       }
       // verify checksum
       uint8_t checksum=0;
       for (int j=0; j<7; j++) {
-          checksum += buf[8*i + j + 1];
+          checksum += buf[9*i + j + 1];
       }
-      if (checksum != buf[8+i + 7 + 1]) {
+      if (checksum != buf[9*i + 7 + 1]) {
           display.print("*");
       }
       display.println();
@@ -185,15 +205,35 @@ void updateDisplay(
 void loop() {
     ArduinoOTA.handle();
     MDNS.update();
+    if (!updateDelay.isExpired()) {
+        return;
+    }
+    updateDelay.restart();
 
 #ifdef SNITCH_TESTER
-    Wire.requestFrom(SNITCH_I2C_ADDR, 1 + (8*3));
-    uint8_t buf[1+(8*3)];
+    uint8_t buf[9*3];
+    uint8_t status;
+    bool goodComm = true;
     memset(buf, 0xFF, sizeof(buf));
-    for (int i=0; Wire.available(); i++) {
-        buf[i] = Wire.read();
+    for (uint8_t i=0; i<3; i++) {
+        Wire.beginTransmission(SNITCH_I2C_ADDR);
+        Wire.write(i);
+        status = Wire.endTransmission();
+        if (status != 0) {
+            goodComm = false;
+            break; // no response from client, it must be disconnected
+        }
+        uint8_t reg, nBytes;
+        do {
+            nBytes = Wire.requestFrom(SNITCH_I2C_ADDR, 10);
+            if (nBytes == 0) { goodComm = false; break; /* unexpected! */ }
+            reg = Wire.read();
+        } while (reg != i);  // busy loop until reg. write is done
+        for (int j=0; Wire.available() && j<9; j++) {
+            buf[(9*i)+j] = Wire.read();
+        }
     }
-    updateDisplay(buf);
+    updateDisplay(buf, goodComm);
 #else
     Wire.requestFrom(FLOWMETER_I2C_ADDR, 8);
     uint64_t count = 0;

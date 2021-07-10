@@ -11,6 +11,8 @@
 #include <mutex.h>
 #include "smrty.pio.h"
 
+//#define DEBUGGING
+
 // It appears the Arduino port to the Raspberry Pi Pico that we are using
 // hardwires I2C to GPIO 6 (SDA) and 7 (SCL) in
 // in https://github.com/arduino/ArduinoCore-mbed/blob/master/variants/RASPBERRY_PI_PICO/pins_arduino.h
@@ -24,24 +26,40 @@ bool wasOn = false;
 PIO pio;
 uint smrty_sm, watchdog_sm;
 uint8_t seqno = 0;
-uint8_t msgno = 0;
 
 // i2c message buffer
-struct smrty_msg i2c_buffer[3];
+#define BUFFER_DEPTH 8
+struct buffer {
+    uint8_t seqno;
+    struct smrty_msg msg;
+} i2c_buffer[BUFFER_DEPTH];
+
+#ifdef DEBUGGING
+static uint32_t longcount = 0;
+#endif
 
 // safety first
 auto_init_mutex(msg_lock);
 
 void requestEvent();
+void receiveEvent(int numBytes);
 
 // the setup routine runs once when you press reset:
 void setup() {
   // initialize the digital pin as an output.
   pinMode(LED_BUILTIN, OUTPUT);
-  memset(i2c_buffer, 0, sizeof(i2c_buffer));
+#ifdef DEBUGGING
+  pinMode(SMRTY_GPIO_PIN, INPUT_PULLUP);
+#else
+  pinMode(SMRTY_GPIO_PIN, INPUT);
+#endif
+  for (int i=0; i<BUFFER_DEPTH; i++) {
+      i2c_buffer[i].seqno = 0xFF;
+  }
 
   Wire.begin(SNITCH_I2C_ADDR); // join i2c bus with address
-  Wire.onRequest(requestEvent); // register event
+  Wire.onReceive(receiveEvent); // register event (bytes from master)
+  Wire.onRequest(requestEvent); // register event (bytes to master)
 
   pio = pio0; // ..or pio1
   uint offset = pio_add_program(pio, &smrty_program);
@@ -56,6 +74,9 @@ void setup() {
 
   // Now enable both programs in sync.
   pio_enable_sm_mask_in_sync(pio, (1<<smrty_sm)|(1<<watchdog_sm));
+  // and tell the world we're alive!
+  digitalWrite(LED_BUILTIN, HIGH);
+  wasOn = true;
 }
 
 void loop() {
@@ -70,6 +91,9 @@ void loop() {
         digitalWrite(LED_BUILTIN, wasOn ? LOW : HIGH);
         wasOn = !wasOn;
     } else {
+#ifdef DEBUGGING
+        longcount++;
+#endif
         return; // nothing to do!
     }
     struct smrty_msg *msg = process_transition(~cycle);
@@ -78,35 +102,59 @@ void loop() {
     }
     // OK! Set up something for I2C to read!
     if (msg->cmd == 0x08) {
-        // Ignore the "wake up" command but use it to reset the msgno
-        msgno = 0;
-        while ((seqno&3)!=0) { seqno++; }
+        // Ignore the "wake up" command
         return;
     }
     mutex_enter_blocking(&msg_lock);
-    memmove(&(i2c_buffer[msgno]), msg, sizeof(*msg));
-    msgno++; seqno++;
-    if (msgno==3) {
-        seqno++; // use lower 2 bits to indicate that read is complete
-        msgno = 0;
-    }
+    memmove(&(i2c_buffer[1]), &(i2c_buffer[0]),
+            sizeof(i2c_buffer[0])*(BUFFER_DEPTH-1));
+    i2c_buffer[0].seqno = seqno++;
+    memmove(&(i2c_buffer[0].msg), msg, sizeof(*msg));
+    // roll over after 7 bits so that we can use 0xFF to indicate 'not here'
+    if (seqno >= 0x80) { seqno = 0; }
     mutex_exit(&msg_lock);
+}
+
+static uint8_t register_requested = 0;
+
+void receiveEvent(int numBytes) {
+    if (numBytes > 0) {
+        register_requested = Wire.read();
+        numBytes--;
+    }
+    for (; numBytes > 0; numBytes--) {
+        Wire.read();
+    }
 }
 
 // function that executes whenever data is requested by master
 // this function is registered as an event, see setup()
 void requestEvent() {
+    // Return the register number; this allows sender to see if we've
+    // processed the register write yet.
+#ifdef DEBUGGING
+    Wire.write(register_requested);
+    for (int i=0; i<5; i++) {
+        Wire.write(0xFF);
+    }
+    Wire.write((uint8_t*)&longcount, 4);
+#else
     if (mutex_try_enter(&msg_lock, NULL)) {
         // library has a 256 byte buffer, so this should be safe.
         // (ie, it shouldn't block)
-        Wire.write(&seqno, sizeof(seqno));
-        Wire.write((uint8_t*)i2c_buffer, sizeof(i2c_buffer));
+        uint8_t idx = (register_requested % BUFFER_DEPTH);
+        Wire.write(register_requested);
+        Wire.write(&(i2c_buffer[idx].seqno), 1);
+        Wire.write((uint8_t*)&(i2c_buffer[idx].msg), 8);
         mutex_exit(&msg_lock);
     } else {
         // Tell the caller to wait
-        uint8_t not_ready = 0xFF;
-        Wire.write(&not_ready, sizeof(not_ready));
+        for (int i=0; i<10; i++) {
+            // This won't match requested register # so master will retry.
+            Wire.write(0xFF);
+        }
     }
+#endif
 }
 
 #endif /* SMRTYSNITCH */
