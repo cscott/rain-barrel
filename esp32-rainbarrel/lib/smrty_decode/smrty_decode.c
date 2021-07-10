@@ -53,13 +53,13 @@ struct smrty_msg *process_transition(uint32_t cycle_count) {
     case LOOKING_FOR_LONG_CHIRP:
     case LOOKING_FOR_SHORT_CHIRP:
         if (state==LOOKING_FOR_SHORT_CHIRP) {
-            if (interval < (COUNTS_PER_HALFCYCLE*4/10) ||
+            if (interval < (COUNTS_PER_HALFCYCLE*3/10) ||
                 interval > (COUNTS_PER_HALFCYCLE*11/10)) {
                 break; // not a chirp
             }
             state = LOOKING_FOR_LONG_CHIRP; // not two short chirps in a row
         } else if (interval < (COUNTS_PER_HALFCYCLE*9/10) ||
-                   interval > (COUNTS_PER_HALFCYCLE*16/10)) {
+                   interval > (COUNTS_PER_HALFCYCLE*17/10)) {
             // not a chirp
             break;
         } else if (interval > (COUNTS_PER_HALFCYCLE*11/10)) {
@@ -174,13 +174,13 @@ struct smrty_msg *process_transition(uint32_t cycle_count) {
 #endif
         // is this interval a chirp?
         if (state==LOOKING_FOR_BIT_SHORT_CHIRP) {
-            if (interval < (COUNTS_PER_HALFCYCLE*4/10) ||
+            if (interval < (COUNTS_PER_HALFCYCLE*3/10) ||
                 interval > (COUNTS_PER_HALFCYCLE*11/10)) {
                 break; // not a chirp
             }
             state = LOOKING_FOR_BIT; // not two short chirps in a row
         } else if (interval < (COUNTS_PER_HALFCYCLE*9/10) ||
-                   interval > (COUNTS_PER_HALFCYCLE*16/10)) {
+                   interval > (COUNTS_PER_HALFCYCLE*17/10)) {
             // not a chirp
             break;
         } else if (interval > (COUNTS_PER_HALFCYCLE*11/10)) {

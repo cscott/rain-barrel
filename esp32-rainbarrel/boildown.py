@@ -18,6 +18,13 @@ headerFile=False
 #filename='../snitch-capture-20210708c-export/analog.csv'
 #thresholdValue = 2.7
 
+#filename='../snitch-capture-20210709a-export/digital.csv'
+#thresholdValue = 0.5
+
+filename='../snitch-capture-20210709a-export/analog.csv'
+thresholdValue = 1.43 # this is best possible value
+thresholdValue = 1.77 # this is what RP2040 actually saw, more or less
+
 
 frequency = 19200 * 256
 
