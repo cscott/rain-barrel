@@ -8,4 +8,6 @@
 
 #define SNITCH_I2C_ADDR 0x24
 
+#define SNITCH_BUFFER_SIZE 8
+
 #endif
