@@ -90,8 +90,6 @@ static inline void smrty_program_init(PIO pio, uint sm, uint offset, uint pin, f
     // parameter to this function.
     sm_config_set_in_pins(&c, pin); // for WAIT
     sm_config_set_jmp_pin(&c, pin); // for JMP
-    // Set this pin's GPIO function (connect PIO to the pad)
-    pio_gpio_init(pio, pin);
     // Set the pin direction to input at the PIO
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     // auto-push enabled
@@ -115,8 +113,6 @@ static inline void watchdog_program_init(PIO pio, uint sm, uint offset, uint pin
     // parameter to this function.
     sm_config_set_in_pins(&c, pin); // for WAIT
     sm_config_set_jmp_pin(&c, pin); // for JMP
-    // Set this pin's GPIO function (connect PIO to the pad)
-    pio_gpio_init(pio, pin);
     // Set the pin direction to input at the PIO
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     // auto-push enabled

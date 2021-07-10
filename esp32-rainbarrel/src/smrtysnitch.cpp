@@ -48,10 +48,12 @@ void receiveEvent(int numBytes);
 void setup() {
   // initialize the digital pin as an output.
   pinMode(LED_BUILTIN, OUTPUT);
-#ifdef DEBUGGING
-  pinMode(SMRTY_GPIO_PIN, INPUT_PULLUP);
-#else
   pinMode(SMRTY_GPIO_PIN, INPUT);
+  gpio_set_dir(SMRTY_GPIO_PIN, false);
+  gpio_disable_pulls(SMRTY_GPIO_PIN);
+  gpio_set_input_enabled(SMRTY_GPIO_PIN, true);
+#ifdef DEBUGGING
+  gpio_pull_up(SMRTY_GPIO_PIN);
 #endif
   for (int i=0; i<BUFFER_DEPTH; i++) {
       i2c_buffer[i].seqno = 0xFF;
@@ -92,10 +94,13 @@ void loop() {
         wasOn = !wasOn;
     } else {
 #ifdef DEBUGGING
-        longcount++;
+        //longcount++;
 #endif
         return; // nothing to do!
     }
+#ifdef DEBUGGING
+    longcount = cycle;
+#endif
     struct smrty_msg *msg = process_transition(~cycle);
     if (msg == NULL) {
         return; // no message yet
