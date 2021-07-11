@@ -121,6 +121,8 @@ void test_20210709a3(void) {
     assert_is_report(run_test(&ptr), 0x0B, 0x00, 0xE0, 0x0E);
     assert_is_report(run_test(&ptr), 0x05, 0x00, 0x42, 0x01); // also 44 01
     assert_is_report(run_test(&ptr), 0x0E, 0x00, 0x00, 0x00);
+    // Later: 38.6% soil moisture: 0B00 140F
+    // 69.1 degrees: 0500 4A01
 }
 
 int main(int argc, char **argv) {
