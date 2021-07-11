@@ -180,6 +180,8 @@ Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "
 // Eventually we'll have feeds for the parsed ground temp and water %
 // but for now dump the raw messages
 Adafruit_MQTT_Publish smrtyFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-raw");
+Adafruit_MQTT_Publish soilMoistureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-moisture");
+Adafruit_MQTT_Publish soilTemperatureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-temperature");
 AsyncDelay smrtyInterval = AsyncDelay(10 * 1000, AsyncDelay::MILLIS);
 uint8_t smrtyLastSeqno = 0xFF;
 #endif
@@ -427,6 +429,26 @@ void publishSmrty(uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
              msg->rx_data1, msg->rx_data2, msg->status,
              msg->checksum, good_checksum ? "":"*");
     smrtyFeed.publish(buf);
+    if (!good_checksum) { return; }
+    // Ok, we might not know *exactly* how to decode these values, but
+    // we can report raw values (and I might have swapped moisture and
+    // temperature data; we'll find out by comparing a cold wet day with
+    // a hot dry day, or maybe a cold dry day with a hot wet one...
+    uint16_t tx_data = ((uint16_t)msg->tx_data2)<<8 | msg->tx_data1;
+    uint16_t rx_data = ((uint16_t)msg->rx_data2)<<8 | msg->rx_data1;
+    switch (tx_data) {
+    case 0x000B:
+        soilMoistureFeed.publish(rx_data);
+        break;
+    case 0x0005:
+        soilTemperatureFeed.publish(rx_data);
+        break;
+    case 0x000E:
+        // This is electrical conductivity, but it's always 0.0, so ignore it.
+        break;
+    default:
+        break;
+    }
 }
 
 bool pollSmrtySnitch(void) {
