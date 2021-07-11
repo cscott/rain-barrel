@@ -28,6 +28,11 @@ uint32_t data_20210709a3[] = {
 WATCHDOG_VALUE
 };
 
+uint32_t data_20210710[] = {
+#include "sample-20210710.h"
+WATCHDOG_VALUE
+};
+
 struct smrty_msg *run_test(uint32_t **data) {
     struct smrty_msg *msg = NULL;
     do {
@@ -118,11 +123,24 @@ void test_20210709a3(void) {
     assert_is_wakeup(run_test(&ptr));
     assert_is_wakeup(run_test(&ptr));
     // Now data message: 38.0% soil moisture, 68.4 deg soil temp, 0.0 EC
-    assert_is_report(run_test(&ptr), 0x0B, 0x00, 0xE0, 0x0E);
-    assert_is_report(run_test(&ptr), 0x05, 0x00, 0x42, 0x01); // also 44 01
+    assert_is_report(run_test(&ptr), 0x0B, 0x00, 0xE0, 0x0E); // 0EE0
+    // at around same time also saw: 44 01 for the 05 message
+    assert_is_report(run_test(&ptr), 0x05, 0x00, 0x42, 0x01); // 0142
     assert_is_report(run_test(&ptr), 0x0E, 0x00, 0x00, 0x00);
     // Later: 38.6% soil moisture: 0B00 140F
     // 69.1 degrees: 0500 4A01
+}
+
+void test_20210710(void) {
+    uint32_t *ptr = data_20210710;
+    // Wake up, three times
+    assert_is_wakeup(run_test(&ptr));
+    assert_is_wakeup(run_test(&ptr));
+    assert_is_wakeup(run_test(&ptr));
+    // Now data message: 35.9% 70.7deg 0.0ec
+    assert_is_report(run_test(&ptr), 0x0B, 0x00, 0x0F, 0x0E); // 0E0F
+    assert_is_report(run_test(&ptr), 0x05, 0x00, 0x58, 0x01); // 0158
+    assert_is_report(run_test(&ptr), 0x0E, 0x00, 0x00, 0x00);
 }
 
 int main(int argc, char **argv) {

@@ -31,6 +31,12 @@ headerFile=False
 filename='../snitch-capture-20210709b-export/analog.csv'
 thresholdValue = 2.0 # this is best possible value
 
+filename='../snitch-capture-20210710-export/digital.csv'
+thresholdValue = 0.5
+
+#filename='../snitch-capture-202107010-export/analog.csv'
+#thresholdValue = 1.5 # this shouldn't matter much
+
 
 frequency = 19200 * 256
 
