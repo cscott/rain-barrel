@@ -185,9 +185,7 @@ bool lastFlowMeterReadingValid = false;
 AsyncDelay flowMeterInterval = AsyncDelay(60 * 1000 - 1, AsyncDelay::MILLIS);
 Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "irrigation-flow");
 
-// Eventually we'll have feeds for the parsed ground temp and water %
-// but for now dump the raw messages
-Adafruit_MQTT_Publish smrtyFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-raw");
+Adafruit_MQTT_Publish smrtyRawFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-raw");
 Adafruit_MQTT_Publish soilMoistureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-moisture");
 Adafruit_MQTT_Publish soilTemperatureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-temperature");
 // This is polling delay; it is also minimum MQTT publish interval so we don't
@@ -439,20 +437,19 @@ void publishSmrty(uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
              msg->addr, msg->cmd, msg->tx_data1, msg->tx_data2,
              msg->rx_data1, msg->rx_data2, msg->status,
              msg->checksum, good_checksum ? "":"*");
-    smrtyFeed.publish(buf);
+    smrtyRawFeed.publish(buf);
     if (!good_checksum) { return; }
-    // Ok, we might not know *exactly* how to decode these values, but
-    // we can report raw values (and I might have swapped moisture and
-    // temperature data; we'll find out by comparing a cold wet day with
-    // a hot dry day, or maybe a cold dry day with a hot wet one...
+    // Do our best to decode these values.
     uint16_t tx_data = ((uint16_t)msg->tx_data2)<<8 | msg->tx_data1;
     uint16_t rx_data = ((uint16_t)msg->rx_data2)<<8 | msg->rx_data1;
     switch (tx_data) {
     case 0x000B:
-        soilMoistureFeed.publish(rx_data);
+        soilMoistureFeed.publish(((float)rx_data)/100.0);
         break;
     case 0x0005:
-        soilTemperatureFeed.publish(rx_data);
+        // This could use more points to do a proper line fit
+        // (This one done at https://mycurvefit.com/)
+        soilTemperatureFeed.publish(33.1877 + (rx_data*.1089572));
         break;
     case 0x000E:
         // This is electrical conductivity, but it's always 0.0, so ignore it.

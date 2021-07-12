@@ -38,18 +38,18 @@ uint32_t data_20210711b[] = {
 WATCHDOG_VALUE
 };
 
-// Moisture level decoded data:
-// 0E0F  35.9
-// 0EE0  38.0
-// 0F14  38.6
-// 0F58  39.2
+// Moisture level decoded data: (just divide by 100!)
+// 0E0F  35.9  dec 3599
+// 0EE0  38.0      3808
+// 0F14  38.6      3860
+// 0F58  39.2      3928
 
-// Soil temperature decoded data:
-// 0142  68.4
-// 0144  68.4
-// 0148  68.9
-// 014A  69.1
-// 0158  70.7
+// Soil temperature decoded data: (divide by 10 add 36.2 gets pretty close)
+// 0142  68.4F 20.2C  322
+// 0144  68.4F 20.2C  324
+// 0148  68.9F 20.5C  328
+// 014A  69.1F 20.6C  330
+// 0158  70.7F 21.5C  344
 
 struct smrty_msg *run_test(uint32_t **data) {
     struct smrty_msg *msg = NULL;
