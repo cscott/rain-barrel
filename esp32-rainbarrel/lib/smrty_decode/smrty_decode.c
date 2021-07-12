@@ -13,6 +13,11 @@
 #define SECONDS(x) ((x/(double)(19200*COUNTS_PER_CYCLE))+FUDGE_FACTOR)
 #endif
 
+#define LOW_NARROW_THRESH 2
+#define LOW_THRESH 9
+#define HIGH_THRESH 11
+#define HIGH_WIDE_THRESH 18
+
 struct smrty_msg msg;
 
 enum decode_state {
@@ -53,16 +58,16 @@ struct smrty_msg *process_transition(uint32_t cycle_count) {
     case LOOKING_FOR_LONG_CHIRP:
     case LOOKING_FOR_SHORT_CHIRP:
         if (state==LOOKING_FOR_SHORT_CHIRP) {
-            if (interval < (COUNTS_PER_HALFCYCLE*3/10) ||
-                interval > (COUNTS_PER_HALFCYCLE*11/10)) {
+            if (interval < (COUNTS_PER_HALFCYCLE*LOW_NARROW_THRESH/10) ||
+                interval > (COUNTS_PER_HALFCYCLE*HIGH_THRESH/10)) {
                 break; // not a chirp
             }
             state = LOOKING_FOR_LONG_CHIRP; // not two short chirps in a row
-        } else if (interval < (COUNTS_PER_HALFCYCLE*9/10) ||
-                   interval > (COUNTS_PER_HALFCYCLE*17/10)) {
+        } else if (interval < (COUNTS_PER_HALFCYCLE*LOW_THRESH/10) ||
+                   interval > (COUNTS_PER_HALFCYCLE*HIGH_WIDE_THRESH/10)) {
             // not a chirp
             break;
-        } else if (interval > (COUNTS_PER_HALFCYCLE*11/10)) {
+        } else if (interval > (COUNTS_PER_HALFCYCLE*HIGH_THRESH/10)) {
             // make sure the next one is not also a long chirp
             state = LOOKING_FOR_SHORT_CHIRP;
         }
@@ -174,16 +179,16 @@ struct smrty_msg *process_transition(uint32_t cycle_count) {
 #endif
         // is this interval a chirp?
         if (state==LOOKING_FOR_BIT_SHORT_CHIRP) {
-            if (interval < (COUNTS_PER_HALFCYCLE*3/10) ||
-                interval > (COUNTS_PER_HALFCYCLE*11/10)) {
+            if (interval < (COUNTS_PER_HALFCYCLE*LOW_NARROW_THRESH/10) ||
+                interval > (COUNTS_PER_HALFCYCLE*HIGH_THRESH/10)) {
                 break; // not a chirp
             }
             state = LOOKING_FOR_BIT; // not two short chirps in a row
-        } else if (interval < (COUNTS_PER_HALFCYCLE*9/10) ||
-                   interval > (COUNTS_PER_HALFCYCLE*17/10)) {
+        } else if (interval < (COUNTS_PER_HALFCYCLE*LOW_THRESH/10) ||
+                   interval > (COUNTS_PER_HALFCYCLE*HIGH_WIDE_THRESH/10)) {
             // not a chirp
             break;
-        } else if (interval > (COUNTS_PER_HALFCYCLE*11/10)) {
+        } else if (interval > (COUNTS_PER_HALFCYCLE*HIGH_THRESH/10)) {
             // make sure the next one is not also a long chirp
             state = LOOKING_FOR_BIT_SHORT_CHIRP;
         }

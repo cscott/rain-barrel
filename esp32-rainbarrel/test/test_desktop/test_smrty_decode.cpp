@@ -33,6 +33,11 @@ uint32_t data_20210710[] = {
 WATCHDOG_VALUE
 };
 
+uint32_t data_20210711b[] = {
+#include "sample-20210711b.h"
+WATCHDOG_VALUE
+};
+
 struct smrty_msg *run_test(uint32_t **data) {
     struct smrty_msg *msg = NULL;
     do {
@@ -143,6 +148,17 @@ void test_20210710(void) {
     assert_is_report(run_test(&ptr), 0x0E, 0x00, 0x00, 0x00);
 }
 
+void test_20210711b(void) {
+    uint32_t *ptr = data_20210711b;
+    // Wake up, three times
+    assert_is_wakeup(run_test(&ptr));
+    assert_is_wakeup(run_test(&ptr));
+    assert_is_wakeup(run_test(&ptr));
+    assert_is_report(run_test(&ptr), 0x0B, 0x00, 0xC8, 0x0F); // 0FC8
+    assert_is_report(run_test(&ptr), 0x05, 0x00, 0x48, 0x01); // 0148
+    assert_is_report(run_test(&ptr), 0x0E, 0x00, 0x00, 0x00);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_struct_is_packed);
@@ -151,6 +167,8 @@ int main(int argc, char **argv) {
     RUN_TEST(test_20210708b);
     RUN_TEST(test_20210708c);
     RUN_TEST(test_20210709a3);
+    RUN_TEST(test_20210710);
+    RUN_TEST(test_20210711b);
     UNITY_END();
 
     return 0;
