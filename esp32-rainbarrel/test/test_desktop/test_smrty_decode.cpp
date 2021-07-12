@@ -38,6 +38,19 @@ uint32_t data_20210711b[] = {
 WATCHDOG_VALUE
 };
 
+// Moisture level decoded data:
+// 0E0F  35.9
+// 0EE0  38.0
+// 0F14  38.6
+// 0F58  39.2
+
+// Soil temperature decoded data:
+// 0142  68.4
+// 0144  68.4
+// 0148  68.9
+// 014A  69.1
+// 0158  70.7
+
 struct smrty_msg *run_test(uint32_t **data) {
     struct smrty_msg *msg = NULL;
     do {
@@ -157,6 +170,8 @@ void test_20210711b(void) {
     assert_is_report(run_test(&ptr), 0x0B, 0x00, 0xC8, 0x0F); // 0FC8
     assert_is_report(run_test(&ptr), 0x05, 0x00, 0x48, 0x01); // 0148
     assert_is_report(run_test(&ptr), 0x0E, 0x00, 0x00, 0x00);
+    // Later: 39.2% soil moisture: 0x0F58 (ie 0B 00 58 0F)
+    // 68.9 degrees: 0x148 (ie 05 00 48 01)
 }
 
 int main(int argc, char **argv) {
