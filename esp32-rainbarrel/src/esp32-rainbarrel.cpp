@@ -70,13 +70,18 @@
 #define COLOR2 EPD_LIGHT
 #define COLOR3 EPD_DARK
 
+// General note: Most (or all?) of the intervals below have small offsets added
+// to make the interval a prime # of milliseconds.  This ensures that intervals
+// will tend to space themselves out over time and not all pile up at the same
+// millisecond boundary.
+
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(4, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
 // 2.9in Grayscale Featherwing or Breakout:
 ThinkInk_290_Grayscale4_T5 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
-AsyncDelay displayMaxRefresh = AsyncDelay(4 * 60 * 60 * 1000, AsyncDelay::MILLIS); // 6x a day need it or not
-AsyncDelay displayMinRefresh = AsyncDelay(5 * 1000, AsyncDelay::MILLIS); // no more than once/five seconds
+AsyncDelay displayMaxRefresh = AsyncDelay(4 * 60 * 60 * 1000 + 11, AsyncDelay::MILLIS); // 6x a day need it or not
+AsyncDelay displayMinRefresh = AsyncDelay(5 * 1000 + 9, AsyncDelay::MILLIS); // no more than once/five seconds
 
-AsyncDelay lightLevelDelay = AsyncDelay(1*1000, AsyncDelay::MILLIS); // 1 Hz
+AsyncDelay lightLevelDelay = AsyncDelay(1*1000 + 9, AsyncDelay::MILLIS); // 1 Hz
 int lightLevel = 0;
 
 struct ButtonPress {
@@ -91,16 +96,16 @@ struct ButtonPress {
 };
 ButtonPress lastButtonPress;
 
-AsyncDelay debounceDelay = AsyncDelay(250, AsyncDelay::MILLIS); // switch debounce
+AsyncDelay debounceDelay = AsyncDelay(250 + 1, AsyncDelay::MILLIS); // switch debounce
 #ifdef RAIN_CLIENT
-AsyncDelay capReadInterval = AsyncDelay(50, AsyncDelay::MILLIS); // read @ 20Hz
+AsyncDelay capReadInterval = AsyncDelay(50 + 3, AsyncDelay::MILLIS); // read @ 20Hz
 #endif
 
 // WiFiClientSecure for SSL/TLS support
 WiFiClientSecure client;
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
-AsyncDelay mqttDelay = AsyncDelay(5000, AsyncDelay::MILLIS); // retry every 5 seconds if not connected
+AsyncDelay mqttDelay = AsyncDelay(5000 + 3, AsyncDelay::MILLIS); // retry every 5 seconds if not connected
 
 // io.adafruit.com root CA
 const char* adafruitio_root_ca = \
@@ -131,18 +136,19 @@ const char* adafruitio_root_ca = \
 // Setup a feed called 'test' for publishing.
 // Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
 #define FEED_PREFIX AIO_USERNAME "/feeds/rain-barrels."
-AsyncDelay lightLevelFeedDelay = AsyncDelay(60*1000, AsyncDelay::MILLIS); // 1/minute
+AsyncDelay lightLevelFeedDelay = AsyncDelay(60*1000 + 17, AsyncDelay::MILLIS); // 1/minute
 #ifdef RAIN_SERVER
 Adafruit_MQTT_Publish lightLevelFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "ambient-light-server");
 
-AsyncDelay valveStateFeedMaxDelay = AsyncDelay(60*60*1000, AsyncDelay::MILLIS); // at least 1/hr
-AsyncDelay valveStateFeedMinDelay = AsyncDelay(1000, AsyncDelay::MILLIS); // not more than 1/second
+AsyncDelay valveStateFeedMaxDelay = AsyncDelay(60*60*1000 + 1, AsyncDelay::MILLIS); // at least 1/hr
+AsyncDelay valveStateFeedMinDelay = AsyncDelay(1000 + 13, AsyncDelay::MILLIS); // not more than 1/second
 Adafruit_MQTT_Publish valveStateFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "water-source");
 #endif
 #ifdef RAIN_CLIENT
 Adafruit_MQTT_Publish lightLevelFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "ambient-light-client");
 
-AsyncDelay waterLevelFeedDelay = AsyncDelay(10*1000, AsyncDelay::MILLIS); // every 10s
+// 11s so they don't hit at the same time as the SMRT-Y poll, which is 9s
+AsyncDelay waterLevelFeedDelay = AsyncDelay(11*1000 + 3, AsyncDelay::MILLIS); // every ~10s
 Adafruit_MQTT_Publish waterLevel1Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel1");
 Adafruit_MQTT_Publish waterLevel2Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel2");
 #endif
@@ -154,7 +160,7 @@ Adafruit_MQTT_Publish waterLevel2Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX
 # define MDNS_NAME CLIENT_MDNS_NAME
 #endif
 
-AsyncDelay connectionWatchdog = AsyncDelay(5*60*1000, AsyncDelay::MILLIS);
+AsyncDelay connectionWatchdog = AsyncDelay(5*60*1000 + 7, AsyncDelay::MILLIS);
 
 #ifdef RAIN_SERVER
 #define WATER_GPIO 10
@@ -166,15 +172,17 @@ Adafruit_DCMotor *ground2 = AFMS.getMotor(3);
 Adafruit_DCMotor *pump = AFMS.getMotor(4);
 
 WebServer server(SERVER_PORT);
-AsyncDelay lastPing = AsyncDelay(3 * KEEPALIVE_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
+AsyncDelay lastPing = AsyncDelay(3 * KEEPALIVE_INTERVAL_SECS * 1000  + 1, AsyncDelay::MILLIS);
 // The valve seems to get hot if you keep it activated -- though it should not!  Anyway, only
 // run the valve for a minute when it changes state.
 int lastValveState = -1;
-AsyncDelay valveRunLength = AsyncDelay(60 * 1000, AsyncDelay::MILLIS);
+AsyncDelay valveRunLength = AsyncDelay(60 * 1000 + 13, AsyncDelay::MILLIS);
 
+// This interval is offset just a smidge because we ideally want to bin the
+// flow per minute. But being .002% too high shouldn't matter.
 uint64_t lastFlowMeterReading = 0;
 bool lastFlowMeterReadingValid = false;
-AsyncDelay flowMeterInterval = AsyncDelay(60 * 1000, AsyncDelay::MILLIS);
+AsyncDelay flowMeterInterval = AsyncDelay(60 * 1000 - 1, AsyncDelay::MILLIS);
 Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "irrigation-flow");
 
 // Eventually we'll have feeds for the parsed ground temp and water %
@@ -182,14 +190,17 @@ Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "
 Adafruit_MQTT_Publish smrtyFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-raw");
 Adafruit_MQTT_Publish soilMoistureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-moisture");
 Adafruit_MQTT_Publish soilTemperatureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-temperature");
-AsyncDelay smrtyInterval = AsyncDelay(10 * 1000, AsyncDelay::MILLIS);
+// This is polling delay; it is also minimum MQTT publish interval so we don't
+// get throttled.
+// 9s so they don't hit at the same time as the water level poll, which is 11s
+AsyncDelay smrtyInterval = AsyncDelay(9 * 1000 + 1, AsyncDelay::MILLIS);
 uint8_t smrtyLastSeqno = 0xFF;
 #endif
 
 #ifdef RAIN_CLIENT
 Adafruit_ADS1115 ads1115;
 AsyncDelay lastLevelReading = AsyncDelay(100, AsyncDelay::MILLIS);
-AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000, AsyncDelay::MILLIS);
+AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000 - 1, AsyncDelay::MILLIS);
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 
 // It would really be nice if we could do this filtering on the analog
@@ -472,6 +483,7 @@ bool pollSmrtySnitch(void) {
     for (--i; i>=0; i--) {
         publishSmrty(read_seqno[i], &read_msgs[i], read_good_checksum[i]);
         smrtyLastSeqno = read_seqno[i];
+        return true; // This ensures that we don't get throttled by Adafruit IO
     }
     return true;
 }
