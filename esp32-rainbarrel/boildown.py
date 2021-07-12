@@ -37,6 +37,13 @@ thresholdValue = 0.5
 #filename='../snitch-capture-202107010-export/analog.csv'
 #thresholdValue = 1.5 # this shouldn't matter much
 
+#filename='../snitch-capture-20210711-export/digital.csv'
+#thresholdValue = 0.5
+
+filename='../snitch-capture-20210711-export/analog.csv'
+thresholdValue = None
+thresholdValueLow = 1.0 # should be 0.8
+thresholdValueHigh = 2.0
 
 frequency = 19200 * 256
 
@@ -57,7 +64,9 @@ with open(filename, 'r') as file:
         if line == '': break
         line = line.split(',')
         seconds,level = float(line[0]), float(line[1])
-        isHigh = (level > thresholdValue)
+        isHigh = (level > thresholdValue) if thresholdValue is not None else \
+          (level > thresholdValueHigh if lastValue == False else
+           (level > thresholdValueLow) )
         timerCount = math.floor(seconds*frequency)
         if statistics:
             maxValue = max(level, maxValue)
