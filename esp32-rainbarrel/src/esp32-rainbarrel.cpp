@@ -180,9 +180,11 @@ AsyncDelay valveRunLength = AsyncDelay(60 * 1000 + 13, AsyncDelay::MILLIS);
 
 // This interval is offset just a smidge because we ideally want to bin the
 // flow per minute. But being .002% too high shouldn't matter.
+// But do try to generate at least 1 data point per day
 uint64_t lastFlowMeterReading = 0;
 bool lastFlowMeterReadingValid = false;
 AsyncDelay flowMeterInterval = AsyncDelay(60 * 1000 - 1, AsyncDelay::MILLIS);
+AsyncDelay flowMeterIntervalMax = AsyncDelay(24 * 60 * 60 * 1000 - 7, AsyncDelay::MILLIS);
 Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "irrigation-flow");
 
 Adafruit_MQTT_Publish smrtyRawFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-raw");
@@ -657,6 +659,7 @@ void setup() {
   valveRunLength.restart(); // run the valve to move it
   lastFlowMeterReadingValid = readFlowMeter(&lastFlowMeterReading);
   flowMeterInterval.restart(); // next read the flow meter in a minute
+  flowMeterIntervalMax.expire(); // report the first reading regardless
 #endif
 
   Serial.println("Ready");
@@ -810,8 +813,12 @@ void updateState() {
         } else {
             double gallons = (newFlow - lastFlowMeterReading) / (double)TICKS_PER_GALLON;
             // don't fill the log with a lot of unnecessary zeroes
-            if (newFlow != lastFlowMeterReading && flowMeterFeed.publish(gallons)) {
-                lastFlowMeterReading = newFlow;
+            if (newFlow != lastFlowMeterReading ||
+                flowMeterIntervalMax.isExpired()) {
+                if (flowMeterFeed.publish(gallons)) {
+                    lastFlowMeterReading = newFlow;
+                    flowMeterIntervalMax.repeat();
+                }
             }
         }
     }
