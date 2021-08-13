@@ -52,7 +52,7 @@ void setup() {
   gpio_set_dir(SMRTY_GPIO_PIN, false);
   gpio_disable_pulls(SMRTY_GPIO_PIN);
   gpio_set_input_enabled(SMRTY_GPIO_PIN, true);
-#ifdef DEBUGGING
+#if 1 // def DEBUGGING
   gpio_pull_up(SMRTY_GPIO_PIN);
 #endif
   for (int i=0; i<SNITCH_BUFFER_SIZE; i++) {
