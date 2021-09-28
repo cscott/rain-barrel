@@ -1,0 +1,40 @@
+Datasheets:
+
+ADP1650 LED driver:
+https://www.analog.com/media/en/technical-documentation/data-sheets/ADP1650.pdf
+https://www.digikey.com/short/223nhvrn
+
+CAP1298 Capacitive touch:
+https://www.microchip.com/en-us/product/CAP1298
+https://ww1.microchip.com/downloads/en/DeviceDoc/00001571B.pdf
+https://www.microchip.com/content/dam/mchp/documents/OTH/ApplicationNotes/ApplicationNotes/01492A.pdf
+App note: https://www.nxp.com/docs/en/application-note/AN3747.pdf
+
+LCD panel: Displaytech 128240D FC BW-3 Graphic LCD
+Digikey 1756-1047-ND or Mouser 758-S128240DFCBW-3
+https://www.ebay.com/itm/293977786571
+https://www.digikey.com/short/012dbnz2
+https://www.seacomp.com/sites/default/files/datasheets/128240D-Series-Displaytech-Spec.pdf
+
+Driver chip: ST7529:
+https://www.sitronix.com.tw/en/products/industrial-display-driver-ic/gray-scale-stn-lcd-driver-ic/
+https://www.crystalfontz.com/controllers/Sitronix/ST7529/
+https://www.crystalfontz.com/controllers/Sitronix/ST7529/287/ (datasheet)
+
+Waterproof enclosure: (haven't bought this yet)
+https://www.adafruit.com/product/905
+Dimensions https://cdn-shop.adafruit.com/datasheets/175mmenclosurediagram.pdf
+
+(Alternative LED drivers:
+https://www.diodes.com/assets/Datasheets/AL3644.pdf
+https://www.ti.com/lit/ds/symlink/lm3642.pdf
+)
+
+Model of raspberry pi pico:
+https://www.hackster.io/news/nicolo-carandini-s-3d-model-brings-an-accurate-raspberry-pi-pico-board-to-your-kicad-projects-7a2dffff9c56
+Featherwing template:
+https://github.com/ppelleti/FeatherWing-template-KiCad
+
+Kicad helpers:
+https://techexplorations.com/blog/kicad/blog-kicad-5-recipe-how-to-create-a-new-component-symbol/
+https://techexplorations.com/kicad-4-book/index-p=112.html
