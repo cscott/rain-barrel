@@ -1,3 +1,4 @@
 (sym_lib_table
   (lib (name Transflective)(type Legacy)(uri /home/cananian/Projects/Electronics/RainBarrel/Transflective/LCD-Panel/Transflective.lib)(options "")(descr ""))
+  (lib (name ADP1650)(type Legacy)(uri /home/cananian/Projects/Electronics/RainBarrel/Transflective/ADP1650ACPZR7/2021-09-28_14-43-11.lib)(options "")(descr ""))
 )
