@@ -672,13 +672,13 @@ Wire Wire Line
 Wire Wire Line
 	1400 1550 2200 1550
 Wire Wire Line
-	1400 1650 2200 1650
+	1400 1350 2200 1350
 Wire Wire Line
 	2700 1550 3500 1550
 Wire Wire Line
 	1400 1450 2200 1450
 Wire Wire Line
-	1400 1350 2200 1350
+	1400 1650 2200 1650
 Text Label 3150 1450 0    50   ~ 0
 CAP_CLK
 Text Label 3150 1550 0    50   ~ 0
@@ -689,9 +689,9 @@ Text Label 1400 1450 0    50   ~ 0
 DS_CLK
 Text Label 1400 1550 0    50   ~ 0
 DS_DAT
-Text Label 1400 1350 0    50   ~ 0
-DS_CS
 Text Label 1400 1650 0    50   ~ 0
+DS_CS
+Text Label 1400 1350 0    50   ~ 0
 DS_RST
 $Comp
 L Transflective:LCD-BACKLIGHT J2
