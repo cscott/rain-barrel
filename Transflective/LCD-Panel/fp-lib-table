@@ -1,3 +1,3 @@
 (fp_lib_table
-  (lib (name Transflective)(type KiCad)(uri /home/cananian/Projects/Electronics/RainBarrel/Transflective/Transflective.pretty)(options "")(descr ""))
+  (lib (name Transflective)(type KiCad)(uri /home/cananian/Projects/Electronics/RainBarrel/Transflective/Rear-Panel/Transflective.pretty)(options "")(descr ""))
 )

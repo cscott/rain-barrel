@@ -357,4 +357,15 @@ Text Notes 3350 5200 0    50   ~ 0
 5V / 12V input/output
 Text Notes 5050 5150 0    50   ~ 0
 ADC board (outside)
+$Comp
+L Transflective:PermaProto J5
+U 1 1 6152F3A3
+P 9250 4900
+F 0 "J5" H 9528 4846 50  0000 L CNN
+F 1 "PermaProto" H 9528 4755 50  0000 L CNN
+F 2 "Transflective:PermaProto" H 9250 4900 50  0001 C CNN
+F 3 "" H 9250 4900 50  0001 C CNN
+	1    9250 4900
+	1    0    0    -1  
+$EndComp
 $EndSCHEMATC
