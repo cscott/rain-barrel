@@ -1,3 +1,43 @@
+To do:
+1) add STEMMA QT socket(s)
+2) add power regulator (5V to 3.3V)
+3) add I2C resistors?
+--
+on base plate: (pads to regulate input to 12v (adj) / 5v / 3.3V) nah
+2 STEMMA QT / 4 pin header(s)
+(2) 3 pin (+5V / SIG / GND) header to supply (5V-diode drop) outside, and
+ to supply 5V power
+ connect to 5V backfeed on unused HUZZAH pin used in basement motor shield
+Feather!
+IDC connector to display
+WATER_GPIO (another 5v/sig/gnd header?)
+breadboard mounting
+motor shield
+rasp pi nano footprint -> (5V/SIG/GND) connector for snitch & routed i2c connection
+----
+To do: assign pin for DS_CS
+Figure out how to wire-AND the pump pressure switch
+  (maybe add an H-Bridge, and wire the switch to the enable input)
+Routing
+---
+Both:
+Feather!
+Cap sense (i2c, 3.3V)
+LCD (SPI)
+
+Basement:
+Motor Shield
+Flow meter (i2c, +5V supply)
+Smrty Snitch (i2c, is there a 5V supply?)
+Water level sensor input?
+Breadboard for smrty snitch
+ (presumably 12V-ish input to motor shield, 12->5V conversion, 5V backfeed to feather through unused HUZZAH pin)
+
+Outside:
+ADS1115 A/D converter (i2c, 3.3V)
+Breadboard (Vin to +/- 9V, 12V->5V switch converter, 2x 5V/SIG/GND one used to power magtag through 1N4001 diode)
+ (how was the ADS1115 connected?)
+
 Datasheets:
 
 ADP1650 LED driver:
@@ -38,3 +78,11 @@ https://github.com/ppelleti/FeatherWing-template-KiCad
 Kicad helpers:
 https://techexplorations.com/blog/kicad/blog-kicad-5-recipe-how-to-create-a-new-component-symbol/
 https://techexplorations.com/kicad-4-book/index-p=112.html
+
+BOM:
+609-F314-1A7H1-11036CT-ND‎ (FPC connector)  1
+732-7624-1-ND‎ (10 uF 0805 X5R capacitor)   2
+F12094CT-ND‎ (1uH 0805 inductor)            1
+ADP1650ACPZ-R7CT-ND (led driver)           1
+732-7664-1-ND (1uF 0805 capacitor)             (have 10ish)
+SN74LVC1G02DBVRG4-ND (NOR gate)            1
