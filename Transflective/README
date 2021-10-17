@@ -79,10 +79,25 @@ Kicad helpers:
 https://techexplorations.com/blog/kicad/blog-kicad-5-recipe-how-to-create-a-new-component-symbol/
 https://techexplorations.com/kicad-4-book/index-p=112.html
 
-BOM:
-609-F314-1A7H1-11036CT-ND‎ (FPC connector)  1
-732-7624-1-ND‎ (10 uF 0805 X5R capacitor)   2
-F12094CT-ND‎ (1uH 0805 inductor)            1
-ADP1650ACPZ-R7CT-ND (led driver)           1
-732-7664-1-ND (1uF 0805 capacitor)             (have 10ish)
-SN74LVC1G02DBVRG4-ND (NOR gate)            1
+BOM:                                       LCD        Rear       Have    Need
+609-F314-1A7H1-11036CT-ND‎ (FPC connector)  1                              2 x
+               (.01uF 0805 capacitor)      1                       8      -
+732-8045-1-ND  (.1uF 0805 capacitor)       2                       9      -
+732-7664-1-ND (1uF 0805 capacitor)         13                      9      4 x
+732-7624-1-ND‎ (10 uF 0805 X5R capacitor)   2                              4 x
+1175-1622-ND (2x7 SMD pin header)          1                              2 x
+              STEMMA QT SMD                2           2          10      -
+F12094CT-ND‎ (1uH 0805 inductor)            1                              2 x
+RNCP0805FTD200RCT-ND (200 ohm 0805)        2                              4 x
+RMCF0805JT10K0CT-ND (10k 0805)             2                              4 x
+RMCF0805JT1M00CT-ND (1M 0805)              1                              2 x
+CAP1298                                    1
+ADP1650ACPZ-R7CT-ND (led driver)           1                       2      -
+3.3V reg                                   1                      1+2     -
+Feather headers                                         2         ?
+SN74LVC1G02DBVRG4-ND (NOR gate)                         1                 -
+  74LVC1G02W5-7DICT-ND‎                                                    1 x
+2648-SC0915CT-ND (Raspberry Pi Pico)                    1                 1 x
+THT 10k                                                 3       lots      -
+
+0805 (2012 metric)

@@ -1206,4 +1206,6 @@ F 3 "~" H 6100 1550 50  0001 C CNN
 	1    6100 1550
 	1    0    0    -1  
 $EndComp
+Text Notes 2900 4200 0    50   ~ 0
+XXX: This should be a 3.3V supply to U2
 $EndSCHEMATC
