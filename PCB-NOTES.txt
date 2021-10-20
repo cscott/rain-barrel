@@ -1,0 +1,14 @@
+v1 of "Rear-Panel" PCB:
+
+* OR gate should be 3.3V supply, not 5V
+* 2x7 header should be rotated 180, either on this board or the other
+
+v1 of "LCD Panel" PCB:
+* The LED driver chip footprint has a center ground pad which
+is much too large and threatens to short out against the pins
+* C18 is stepped on by the 2x7 header.  "Use local reg" is a little
+too close as well.
+* Footprint for 2x7 header (a) pads should be wider, they don't reach
+the ends of the pins which makes it hard to line up, and (b) the
+silkscreen outline is too small, again can't be seen when the
+component is placed.

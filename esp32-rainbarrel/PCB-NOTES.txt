@@ -1,6 +1,0 @@
-v1 of PCB:
-
-OR gate should be 3.3V supply, not 5V
-2x7 header should be rotated 180, either on bottom or top board
-The LED driver chip footprint has a center ground pad which
-is much too large and threatens to short out against the pins
