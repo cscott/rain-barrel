@@ -1,0 +1,1 @@
+#define ADP1650_I2C_ADDR 0x30

@@ -1,7 +1,7 @@
 #ifndef SMRTYSNITCH_H
 #define SMRTYSNITCH_H
 
-// Flowmeter is 0x07
+// Flowmeter is 0x08
 // Motor Shield is 0x60 (selectable up to 0x6F)
 // LIS3DH is 0x19
 // OLED featherwing (for flowtester) is 0x3C
