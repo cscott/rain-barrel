@@ -1,5 +1,5 @@
-#ifdef FLOWTESTER
-#define SNITCH_TESTER // also used to test the I2C on the snitch!
+// This file is used to test the flowmeter as well as the smrty snitch
+#if defined(FLOWTESTER) || defined(SNITCH_TESTER)
 #include "Arduino.h"
 #include <Wire.h>
 #include <AsyncDelay.h>
@@ -158,7 +158,11 @@ void updateDisplay(
   display.setCursor(0,0);
   display.setTextSize(1);
   invertText();
+#ifdef SNITCH_TESTER
+  display.println("SMRT-Y snitch tester");
+#else
   display.println("Flow meter tester");
+#endif
   normalText();
   display.print("IP: ");
   display.println(WiFi.localIP());

@@ -7,12 +7,14 @@
 #include <WiFiClient.h>
 #include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
+#include <Adafruit_GFX.h>
+
+#define HAS_OLED
 
 // includes for OLED display
-#include <SPI.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
+#ifdef HAS_OLED
 #include <Adafruit_SH110X.h> // I2C 0x3C
+#endif
 
 #include "config.h"
 #define MDNS_NAME "flowtester" // keep same name as flowtester
@@ -21,8 +23,9 @@
 #include "smrtysnitch.h" // I2C 0x24
 #include "cap1298.h"   // I2C 0x28
 #include "adp1650.h"   // I2C 0x30 (not found :( )
-// motor shield is 0x60
+//#include <Adafruit_MotorShield.h> // I2C 0x60
 
+#ifdef HAS_OLED
 // Configuration of OLED display
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
 
@@ -30,6 +33,7 @@ Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
 #define BUTTON_A  0
 #define BUTTON_B 16
 #define BUTTON_C  2
+#endif
 
 // Other config
 #define LED_GPIO 0
@@ -45,6 +49,7 @@ AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
 bool blinkWasOn = false;
 bool mdns_success;
 
+#ifdef HAS_OLED
 void normalText() {
   display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 }
@@ -60,6 +65,7 @@ void printHex(uint8_t num) {
     snprintf(buf, sizeof(buf), "%02X", (int)num);
     display.print(buf);
 }
+#endif
 
 bool writeRegister(uint8_t i2c_addr, uint8_t regno, uint8_t val) {
   Wire.beginTransmission(i2c_addr);
@@ -95,11 +101,13 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
+#ifdef HAS_OLED
   // OLED setup
   display.begin(0x3C, true); // Address 0x3C default
   pinMode(BUTTON_A, INPUT_PULLUP);
   pinMode(BUTTON_B, INPUT_PULLUP);
   pinMode(BUTTON_C, INPUT_PULLUP);
+#endif
 
   digitalWrite(LCD_CS, 1);
   pinMode(LCD_CS, OUTPUT);
@@ -136,6 +144,7 @@ void setup() {
   // Recalibrate all channels now.
   writeRegister(CAP1298_I2C_ADDR, CAP1298_REG_CALIBRATION, 0x1F);
 
+#ifdef HAS_OLED
   // Clear the buffer.
   display.clearDisplay();
   display.setRotation(1);
@@ -150,24 +159,29 @@ void setup() {
   display.println("");
   display.print("Connecting to SSID\n" WIFI_SSID ": ");
   display.display();
+#endif
 
   // Wait for connection
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
+#ifdef HAS_OLED
   display.clearDisplay();
   display.setCursor(0,0);
   display.print("IP: ");
   display.println(WiFi.localIP());
   display.display();
+#endif
 
   mdns_success = false;
   if (MDNS.begin(MDNS_NAME)) {
     mdns_success = true;
     Serial.println("MDNS responder started: " MDNS_NAME);
+#ifdef HAS_OLED
     display.println("mDNS: " MDNS_NAME);
     display.display();
+#endif
   }
 
   // Hostname defaults to esp3232-[MAC]
@@ -204,6 +218,7 @@ void setup() {
 }
 
 void updateDisplay(bool blink) {
+#ifdef HAS_OLED
     uint8_t nBytes, status, val;
 
   display.clearDisplay();
@@ -326,6 +341,7 @@ void updateDisplay(bool blink) {
 #endif
 
   display.display();
+#endif
 }
 
 void loop() {

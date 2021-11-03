@@ -1,0 +1,3 @@
+[submodule "esp32-rainbarrel/lib/ESP8266_SPI_Driver"]
+	path = esp32-rainbarrel/lib/ESP8266_SPI_Driver
+	url = gh:cscott/ESP8266_SPI_Driver

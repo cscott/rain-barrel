@@ -2,6 +2,8 @@ v1 of "Rear-Panel" PCB:
 
 * OR gate should be 3.3V supply, not 5V
 * 2x7 header should be rotated 180, either on this board or the other
+* Swap F0 and F3
+* Probably should have a jumper for LCD_RST
 
 v1 of "LCD Panel" PCB:
 * The LED driver chip footprint has a center ground pad which
@@ -12,3 +14,5 @@ too close as well.
 the ends of the pins which makes it hard to line up, and (b) the
 silkscreen outline is too small, again can't be seen when the
 component is placed.
+* The X component of the top/bottom tabs is a little too large, needs
+to be trimmed down to fit better.  (The side tabs are fine.)
