@@ -1,23 +1,23 @@
-#if defined(RAIN_SERVER) || defined(RAIN_CLIENT)
-#if defined(RAIN_SERVER) && defined(RAIN_CLIENT)
-# error Can not define both RAIN_SERVER and RAIN_CLIENT, pick one!
+#if defined(RAINPUMP_V2) || defined(RAINGAUGE_V2)
+#if defined(RAINPUMP_V2) && defined(RAINGAUGE_V2)
+# error Can not define both RAINPUMP_V2 and RAINGAUGE_V2, pick one!
 #endif
 
 #define MOTOR_DRIVER_CONNECTED
 #define FLOWMETER_CONNECTED
+//#define ADC_CONNECTED
 #undef DEV_MODE // shorter delays for easier development
 
 #include "Arduino.h"
-#include <WiFi.h>
-#include <WiFiClient.h>
-#include <WiFiClientSecure.h>
-#include <WebServer.h>
-#include <ESPmDNS.h>
-#include <WiFiUdp.h>
-#include <ArduinoOTA.h>
 #include <Wire.h>
-#include <Adafruit_NeoPixel.h>
-#include <Adafruit_ThinkInk.h>
+#include <AsyncDelay.h>
+
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266mDNS.h>
+#include <ArduinoOTA.h>
+#include <Adafruit_GFX.h>
+
 #include <Adafruit_MQTT.h>
 #include <Adafruit_MQTT_Client.h>
 #include <ArduinoJson.h>
@@ -27,22 +27,30 @@
 #include "bluebold-14px.h"
 #include "icons.h"
 
-#ifdef RAIN_SERVER
+// V2 hardware features
+#include "st7529.h"
+#include "cap1298.h"
+// also adp1650.h, but that's not working yet
+// V2 pin assignments
+#define LCD_RST         2 // F0 / GPIO  2 => LCD_RST (out)
+#define PRESSURE_SW    16 // F1 / GPIO 16 => Pressure switch (in)
+#define PUMP_CNTRL      0 // F2 / GPIO  0 => Pump (out)
+#define LCD_CS         15 // F3 / GPIO 15 => LCD_CS (out)
+#define LCD_MOSI       13 // F4 / GPIO 13 => LCD_MOSI (out)
+#define WATER_SENSE    10 // F5 / GPIO 12 => Water sensor (in)
+#define LCD_SCK        14 // F6 / GPIO 14 => LCD_SCK
+
+#ifdef RAIN_SERVER_v2
 # include <Adafruit_MotorShield.h>
 # include "flowmeter.h"
 # include "smrtysnitch.h"
 # include "smrty_decode.h"
-//# define ENABLE_AUDIO
 #endif
-#ifdef RAIN_CLIENT
-# include <HTTPClient.h>
-# include "MPR121.h"
+#ifdef RAINGAUGE_V2
+# include <ESP8266HTTPClient.h>
+#ifdef ADC_CONNECTED
 # include <Adafruit_ADS1X15.h>
-# define DISABLE_BUTTONS // sensitivity needs adjustment
 #endif
-
-#ifdef ENABLE_AUDIO
-#include "coin.h"
 #endif
 
 #define SERVER_MDNS_NAME "rainpump"
@@ -61,43 +69,36 @@
 // We count both transitions, so 3673.4 ticks per gallon.
 #define TICKS_PER_GALLON 3673.4
 
-#define EPD_DC      7 // can be any pin, but required!
-#define EPD_CS      8  // can be any pin, but required!
-#define EPD_BUSY    -1  // can set to -1 to not use a pin (will wait a fixed delay)
-#define SRAM_CS     -1  // can set to -1 to not use a pin (uses a lot of RAM!)
-#define EPD_RESET   6  // can set to -1 and share with chip Reset (can't deep sleep)
-#define COLOR1 EPD_BLACK
-#define COLOR2 EPD_LIGHT
-#define COLOR3 EPD_DARK
+#define COLOR1 0x00 // was: EPD_WHITE
+#define COLOR2 0xA0 // was: EPD_LIGHT
+#define COLOR3 0xC0 // was: EPD_DARK
+#define COLOR4 0xFF // was: EPD_BLACK
 
 // General note: Most (or all?) of the intervals below have small offsets added
 // to make the interval a prime # of milliseconds.  This ensures that intervals
 // will tend to space themselves out over time and not all pile up at the same
 // millisecond boundary.
 
-Adafruit_NeoPixel pixels = Adafruit_NeoPixel(4, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
-// 2.9in Grayscale Featherwing or Breakout:
-ThinkInk_290_Grayscale4_T5 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
-AsyncDelay displayMaxRefresh = AsyncDelay(4 * 60 * 60 * 1000 + 11, AsyncDelay::MILLIS); // 6x a day need it or not
-AsyncDelay displayMinRefresh = AsyncDelay(5 * 1000 + 9, AsyncDelay::MILLIS); // no more than once/five seconds
+ST7529_LCD display = ST7529_LCD();
 
-AsyncDelay lightLevelDelay = AsyncDelay(1*1000 + 9, AsyncDelay::MILLIS); // 1 Hz
-int lightLevel = 0;
+AsyncDelay displayMaxRefresh = AsyncDelay(4 * 60 * 60 * 1000 + 11, AsyncDelay::MILLIS); // 6x a day need it or not
+AsyncDelay displayMinRefresh = AsyncDelay(13, AsyncDelay::MILLIS); // no more than once/10ms seconds
 
 struct ButtonPress {
-  ButtonPress(): a(false), b(false), c(false), d(false) {}
+  ButtonPress(): a(false), b(false), c(false), d(false), prox(false) {}
   boolean a : 1;
   boolean b : 1;
   boolean c : 1;
   boolean d : 1;
+  boolean prox : 1;
   bool operator==(const ButtonPress& rhs) const {
-    return a == rhs.a && b == rhs.b && c == rhs.c && d == rhs.d;
+    return a == rhs.a && b == rhs.b && c == rhs.c && d == rhs.d && prox == rhs.prox;
   }
 };
 ButtonPress lastButtonPress;
 
 AsyncDelay debounceDelay = AsyncDelay(250 + 1, AsyncDelay::MILLIS); // switch debounce
-#ifdef RAIN_CLIENT
+#ifdef RAINGAUGE_V2
 AsyncDelay capReadInterval = AsyncDelay(50 + 3, AsyncDelay::MILLIS); // read @ 20Hz
 #endif
 
@@ -136,34 +137,28 @@ const char* adafruitio_root_ca = \
 // Setup a feed called 'test' for publishing.
 // Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
 #define FEED_PREFIX AIO_USERNAME "/feeds/rain-barrels."
-AsyncDelay lightLevelFeedDelay = AsyncDelay(60*1000 + 17, AsyncDelay::MILLIS); // 1/minute
-#ifdef RAIN_SERVER
-Adafruit_MQTT_Publish lightLevelFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "ambient-light-server");
-
+#ifdef RAINPUMP_V2
 AsyncDelay valveStateFeedMaxDelay = AsyncDelay(60*60*1000 + 1, AsyncDelay::MILLIS); // at least 1/hr
 AsyncDelay valveStateFeedMinDelay = AsyncDelay(1000 + 13, AsyncDelay::MILLIS); // not more than 1/second
 Adafruit_MQTT_Publish valveStateFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "water-source");
 #endif
-#ifdef RAIN_CLIENT
-Adafruit_MQTT_Publish lightLevelFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "ambient-light-client");
-
+#ifdef RAINGAUGE_V2
 // 11s so they don't hit at the same time as the SMRT-Y poll, which is 9s
 AsyncDelay waterLevelFeedDelay = AsyncDelay(11*1000 + 3, AsyncDelay::MILLIS); // every ~10s
 Adafruit_MQTT_Publish waterLevel1Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel1");
 Adafruit_MQTT_Publish waterLevel2Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel2");
 #endif
 
-#ifdef RAIN_SERVER
+#ifdef RAINPUMP_V2
 # define MDNS_NAME SERVER_MDNS_NAME
 #endif
-#ifdef RAIN_CLIENT
+#ifdef RAINGAUGE_V2
 # define MDNS_NAME CLIENT_MDNS_NAME
 #endif
 
 AsyncDelay connectionWatchdog = AsyncDelay(5*60*1000 + 7, AsyncDelay::MILLIS);
 
-#ifdef RAIN_SERVER
-#define WATER_GPIO 10
+#ifdef RAINPUMP_V2
 // Motorshield configuration
 Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *cityValve = AFMS.getMotor(1);
@@ -197,8 +192,10 @@ AsyncDelay smrtyInterval = AsyncDelay(9 * 1000 + 1, AsyncDelay::MILLIS);
 uint8_t smrtyLastSeqno = 0xFF;
 #endif
 
-#ifdef RAIN_CLIENT
+#ifdef RAINGAUGE_V2
+#ifdef ADC_CONNECTED
 Adafruit_ADS1115 ads1115;
+#endif
 AsyncDelay lastLevelReading = AsyncDelay(100, AsyncDelay::MILLIS);
 AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000 - 1, AsyncDelay::MILLIS);
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
@@ -208,8 +205,6 @@ String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 // Actually - one of our sensors is much noisier than the other! HW issue?
 #define LEVEL_SAMPLE_FILTER 4
 int32_t level_accum[2] = { 0, 0 };
-
-MPR121 capTouch;
 #endif
 
 enum PumpState {
@@ -257,7 +252,7 @@ SystemState state = {
   { 560, 630 },
 };
 SystemState last_displayed_state = state;
-#ifdef RAIN_CLIENT
+#ifdef RAINGAUGE_V2
 SystemState last_xmit_state = state;
 #endif
 
@@ -271,7 +266,7 @@ void boldface() {
   display.setFont(&bluebold14pt7b);
 }
 
-#ifdef RAIN_SERVER
+#ifdef RAINPUMP_V2
 // Web server
 void handleRoot() {
   char temp[800];
@@ -489,189 +484,265 @@ bool pollSmrtySnitch(void) {
 
 #endif
 
-void setup() {
-  // initialize built in LED pin as an output.
-  Serial.begin(115200);
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, HIGH);
-  pinMode(BUTTON_A, INPUT_PULLUP);
-  pinMode(BUTTON_B, INPUT_PULLUP);
-  pinMode(BUTTON_C, INPUT_PULLUP);
-  pinMode(BUTTON_D, INPUT_PULLUP);
-
-  // set speaker enable pin to output
-  pinMode(SPEAKER_SHUTDOWN, OUTPUT);
-  // and immediately disable it to save power
-  digitalWrite(SPEAKER_SHUTDOWN, LOW);
-
-#ifdef RAIN_SERVER
-  pinMode(WATER_GPIO, INPUT_PULLDOWN);
-  Wire.begin();
-#ifdef MOTOR_DRIVER_CONNECTED
-  // Motorshield Setup
-  AFMS.begin();
-  // This should ground all outputs
-  cityValve->setSpeed(0); cityValve->run(FORWARD);
-  ground1->setSpeed(0); ground1->run(FORWARD);
-  ground2->setSpeed(0); ground2->run(FORWARD);
-  pump->setSpeed(0); pump->run(FORWARD);
-#endif
-#endif
-
-#ifdef RAIN_CLIENT
-  pinMode(A1, INPUT);
-  pinMode(2, INPUT);
-  pinMode(10, INPUT);
-  delay(100); // cap touch needs a moment!
-  Wire.begin();
-  capTouch = MPR121(-1, false, 0x5A, false, true);
-  // Adafruit defaults TOUCH_THRESHOLD_DEFAULT 12 RELEASE_THRESHOLD_DEFAULT 6
-  capTouch.setThresholds(8, 2);
-  capTouch.setThreshold(0, 20, 2); // button A has an itchy trigger
-  ads1115.begin(0x48); // At default address
-  ads1115.setGain(GAIN_TWO); // +/-2.048V
-#endif
-
-  // for light sensor
-  analogReadResolution(12); //12 bits
-  analogSetAttenuation(ADC_11db);  //For all pins
-
-  // Neopixel power
-  pinMode(NEOPIXEL_POWER, OUTPUT);
-  digitalWrite(NEOPIXEL_POWER, LOW); // on
-
-  pixels.begin();
-  pixels.setBrightness(50);
-  pixels.fill(0xFF00FF);
-  pixels.show(); // Show startup color
-
-  display.begin(THINKINK_GRAYSCALE4);
-  display.clearBuffer();
-  display.setTextSize(1);
-  display.setTextColor(EPD_BLACK);
-  boldface();
-  display.setCursor(0, 20);
-  display.println(MDNS_NAME);
-  normalface();
-  display.setTextWrap(true);
-  display.print("Connecting to SSID: ");
-  display.println(WIFI_SSID);
-  display.display();
-
-  Serial.println("Booting");
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    Serial.println("Connection Failed! Rebooting...");
-    delay(5000);
-    ESP.restart();
-  }
-  // Set Adafruit IO's root CA
-  client.setCACert(adafruitio_root_ca);
-
-  // Port defaults to 3232
-  // ArduinoOTA.setPort(3232);
-
-  // Hostname defaults to esp3232-[MAC]
-  ArduinoOTA.setHostname(MDNS_NAME);
-
-  // No authentication by default
-#ifndef DEV_MODE
-  ArduinoOTA.setPassword(OTA_PASSWD);
-#endif
-
-  // Password can be set with it's md5 value as well
-  // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
-  // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
-
-  ArduinoOTA
-  .onStart([]() {
-    String type;
-    digitalWrite(LED_BUILTIN, LOW);
-    if (ArduinoOTA.getCommand() == U_FLASH)
-      type = "sketch";
-    else // U_SPIFFS
-      type = "filesystem";
-
-    // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-    Serial.println("Start updating " + type);
-  })
-  .onEnd([]() {
-    Serial.println("\nEnd");
-  })
-  .onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  })
-  .onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  });
-
-  ArduinoOTA.begin();
-
-#ifdef RAIN_CLIENT
-  // Find the pump server
-  int n = MDNS.queryService("http", "tcp");
-  for (int i = 0; i < n; i++) {
-    Serial.print("  ");
-    Serial.print(i + 1);
-    Serial.print(": ");
-    Serial.print(MDNS.hostname(i));
-    Serial.print(" (");
-    Serial.print(MDNS.IP(i));
-    Serial.print(":");
-    Serial.print(MDNS.port(i));
-    Serial.println(")");
-    if (MDNS.hostname(i) == "rainpump") {
-      serverBaseUrl.remove(0);
-      serverBaseUrl += "http://";
-      serverBaseUrl += MDNS.IP(i).toString();
-      serverBaseUrl += ":";
-      serverBaseUrl += MDNS.port(i);
-      serverBaseUrl += "/update";
-      Serial.print("rainpump found: ");
-      Serial.println(serverBaseUrl);
+bool cap1298_write(uint8_t regno, uint8_t val) {
+    Wire.beginTransmission(CAP1298_I2C_ADDR);
+    Wire.write(regno);
+    Wire.write(val);
+    uint8_t status = Wire.endTransmission();
+    if (status != 0) {
+        return false;
     }
-  }
-  for (int i=0; i<2; i++) {
-      level_accum[i] = 0;
-      for (int j=0; j<LEVEL_SAMPLE_FILTER; j++) {
-          level_accum[i] += ads1115.readADC_SingleEnded(i);
-      }
-  }
-#endif
-
-#ifdef RAIN_SERVER
-  server.on("/", handleRoot);
-  server.on("/test.svg", drawGraph);
-  server.on("/inline", []() {
-    server.send(200, "text/plain", "this works as well");
-  });
-  server.on("/update", handleUpdate);
-  server.onNotFound(handleNotFound);
-  server.begin();
-  MDNS.addService("http", "tcp", SERVER_PORT);
-  Serial.println("HTTP server started");
-  valveRunLength.restart(); // run the valve to move it
-  lastFlowMeterReadingValid = readFlowMeter(&lastFlowMeterReading);
-  flowMeterInterval.restart(); // next read the flow meter in a minute
-  flowMeterIntervalMax.expire(); // report the first reading regardless
-#endif
-
-  Serial.println("Ready");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-  displayMaxRefresh.expire();
-  displayMinRefresh.expire();
-  lastPing.expire();
-  connectionWatchdog.restart();
+    return true;
+}
+bool cap1298_read(uint8_t regno, uint8_t *val) {
+    Wire.beginTransmission(CAP1298_I2C_ADDR);
+    Wire.write(regno);
+    uint8_t status = Wire.endTransmission();
+    if (status != 0) {
+        return false;
+    }
+    uint8_t nBytes = Wire.requestFrom(CAP1298_I2C_ADDR, 1);
+    if (nBytes == 0) {
+        return false;
+    }
+    *val = Wire.read();
+    return true;
 }
 
-#ifdef RAIN_CLIENT
+void cap1298_setup() {
+    // CAP1298 setup
+    // main control => combo mode, active gain=1, standby gain=8
+    cap1298_write(CAP1298_REG_MAIN_CONTROL, 0x0E);
+    // No multitouch limiting
+    cap1298_write(CAP1298_REG_MULTI_TOUCH_CONFIG, 0x00);
+    // No repeating interrupts
+    cap1298_write(CAP1298_REG_REPEAT_ENABLE, 0x00);
+    // No signal guard (default value). CS5 was supposed to be guard for CS6,
+    // but as it turns out CS6 has too large a capacitance to be used.
+    cap1298_write(CAP1298_REG_SIGNAL_GUARD_ENABLE, 0x00);
+    // Enable CS1-CS4 in "active" mode.
+    cap1298_write(CAP1298_REG_SENSOR_INPUT_ENABLE, 0x0F);
+    // Default 32x sensitivity for active mode. (bump to 1F or 0F for more sens.)
+    cap1298_write(CAP1298_REG_SENSITIVITY_CONTROL, 0x2F);
+    // Default averaging and sensing cycle time for active channels
+    cap1298_write(CAP1298_REG_SAMPLING_CONFIG, 0x39);
+    // Enable CS5 in "standby" mode (CS6 is unusable)
+    cap1298_write(CAP1298_REG_STANDBY_CHANNEL, 0x10);
+    // Default averaging and sensing cycle time for standby channels
+    cap1298_write(CAP1298_REG_STANDBY_CONFIG, 0x39);
+    // Maximum 128x sensitivity for standby channels.
+    cap1298_write(CAP1298_REG_STANDBY_SENSITIVITY, 0x00);
+    // Gain adj: CS1=1, CS2=1, CS3=2, CS4=2
+    cap1298_write(CAP1298_REG_CALIBRATION_SENSITIVITY1, 0x50);
+    // Gain adj: CS5=1 CS6=1 CS7=1 CS8=1
+    cap1298_write(CAP1298_REG_CALIBRATION_SENSITIVITY2, 0x00);
+    // Recalibrate all channels now.
+    cap1298_write(CAP1298_REG_CALIBRATION, 0x1F);
+}
+
+void cap1298_read_buttons(ButtonPress *bp) {
+    uint8_t val;
+    if (!cap1298_read(CAP1298_REG_SENSOR_STATUS, &val)) {
+        return;
+    }
+    if (val & 0x01) {
+        bp->a = true;
+    }
+    if (val & 0x02) {
+        bp->b = true;
+    }
+    if (val & 0x04) {
+        bp->c = true;
+    }
+    if (val & 0x08) {
+        bp->d = true;
+    }
+    if (val & 0x10) {
+        bp->prox = true;
+    }
+}
+
+void setup() {
+    Wire.begin();
+    Serial.begin(115200);
+    Serial.println("Setup!");
+    // initialize built in LED pin as an output.
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
+
+    pinMode(WATER_SENSE, INPUT_PULLUP);
+    pinMode(PRESSURE_SW, INPUT_PULLUP);
+    pinMode(PUMP_CNTRL, OUTPUT);
+
+    digitalWrite(LCD_CS, 1);
+    pinMode(LCD_CS, OUTPUT);
+    digitalWrite(LCD_RST, 0);
+    pinMode(LCD_RST, OUTPUT);
+
+    Serial.println("WiFi setup");
+    // Wifi Setup
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+    Serial.println("cap1298 setup");
+    cap1298_setup();
+
+#ifdef RAINPUMP_V2
+#ifdef MOTOR_DRIVER_CONNECTED
+    // Motorshield Setup
+    Serial.println("Motorshield setup");
+    AFMS.begin();
+    // This should ground all outputs
+    cityValve->setSpeed(0); cityValve->run(FORWARD);
+    ground1->setSpeed(0); ground1->run(FORWARD);
+    ground2->setSpeed(0); ground2->run(FORWARD);
+    pump->setSpeed(0); pump->run(FORWARD);
+#endif
+#endif
+
+#ifdef RAINGAUGE_V2
+#ifdef ADC_CONNECTED
+    Serial.println("ADC setup");
+    ads1115.begin(0x48); // At default address
+    ads1115.setGain(GAIN_TWO); // +/-2.048V
+#endif
+#endif
+
+    Serial.println("Display setup");
+    display.begin();
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(COLOR4);
+    boldface();
+    display.setCursor(0, 20);
+    display.println(MDNS_NAME);
+    normalface();
+    display.setTextWrap(true);
+    display.print("Connecting to SSID: ");
+    display.println(WIFI_SSID);
+    Serial.println("About to display");
+    display.display();
+
+    Serial.println("Booting");
+
+    // Wait for connection
+    int timeout = 0;
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+        timeout++;
+        if (timeout > 60) {
+            Serial.println("Connection Failed! Rebooting...");
+            ESP.restart();
+        }
+    }
+    display.print("IP: ");
+    display.println(WiFi.localIP());
+    display.display();
+
+    bool mdns_success = false;
+    if (MDNS.begin(MDNS_NAME)) {
+        mdns_success = true;
+        Serial.println("MDNS responder started: " MDNS_NAME);
+        display.println("mDNS: " MDNS_NAME);
+        display.display();
+    }
+
+    // Set Adafruit IO's root CA
+    // client.setCACert(adafruitio_root_ca); // XXX
+
+    ArduinoOTA.setHostname(MDNS_NAME);
+    ArduinoOTA.setPassword(OTA_PASSWD);
+    ArduinoOTA
+    .onStart([]() {
+        String type;
+        digitalWrite(LED_BUILTIN, LOW);
+        if (ArduinoOTA.getCommand() == U_FLASH)
+            type = "sketch";
+        else // U_SPIFFS
+            type = "filesystem";
+
+        // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+        Serial.println("Start updating " + type);
+    });
+    ArduinoOTA.onEnd([]() {
+        Serial.println("\nEnd");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+        Serial.printf("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+        else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    });
+
+    ArduinoOTA.begin();
+
+#ifdef RAINGAUGE_V2
+    // Find the pump server
+    int n = MDNS.queryService("http", "tcp");
+    for (int i = 0; i < n; i++) {
+        Serial.print("  ");
+        Serial.print(i + 1);
+        Serial.print(": ");
+        Serial.print(MDNS.hostname(i));
+        Serial.print(" (");
+        Serial.print(MDNS.IP(i));
+        Serial.print(":");
+        Serial.print(MDNS.port(i));
+        Serial.println(")");
+        if (MDNS.hostname(i) == "rainpump") {
+            serverBaseUrl.remove(0);
+            serverBaseUrl += "http://";
+            serverBaseUrl += MDNS.IP(i).toString();
+            serverBaseUrl += ":";
+            serverBaseUrl += MDNS.port(i);
+            serverBaseUrl += "/update";
+            Serial.print("rainpump found: ");
+            Serial.println(serverBaseUrl);
+        }
+    }
+    for (int i=0; i<2; i++) {
+        level_accum[i] = 0;
+#ifdef ADC_CONNECTED
+        for (int j=0; j<LEVEL_SAMPLE_FILTER; j++) {
+            level_accum[i] += ads1115.readADC_SingleEnded(i);
+        }
+#endif
+    }
+#endif
+
+#ifdef RAINPUMP_V2
+    server.on("/", handleRoot);
+    server.on("/test.svg", drawGraph);
+    server.on("/inline", []() {
+        server.send(200, "text/plain", "this works as well");
+    });
+    server.on("/update", handleUpdate);
+    server.onNotFound(handleNotFound);
+    server.begin();
+    MDNS.addService("http", "tcp", SERVER_PORT);
+    Serial.println("HTTP server started");
+    valveRunLength.restart(); // run the valve to move it
+    lastFlowMeterReadingValid = readFlowMeter(&lastFlowMeterReading);
+    flowMeterInterval.restart(); // next read the flow meter in a minute
+    flowMeterIntervalMax.expire(); // report the first reading regardless
+#endif
+
+    Serial.println("Ready");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+    displayMaxRefresh.expire();
+    displayMinRefresh.expire();
+    lastPing.expire();
+    connectionWatchdog.restart();
+}
+
+#ifdef RAINGAUGE_V2
 void sendUpdate(int new_user_state = -1) {
   state.connected_recently = false;
   // test client
@@ -686,7 +757,7 @@ void sendUpdate(int new_user_state = -1) {
     url2 += new_user_state;
   }
   //Serial.println(url2);
-  http.begin(url2);
+  http.begin(client, url2);
   int httpCode = http.GET();
   if (httpCode == HTTP_CODE_OK) {
     StaticJsonDocument<192> root;
@@ -709,57 +780,8 @@ void sendUpdate(int new_user_state = -1) {
 }
 #endif
 
-void updatePixels() {
-  // Measured light levels:
-  // 8191 cloudy day outside (this is saturated)
-  // 5800 in my office during the daytime with the lights on (cloudy day)
-  // 4200 in my office during the daytime with the lights off (cloudy day)
-  // 1400-1500 in my office indoors at night
-  // 0 with my finger over it
-  pixels.setBrightness(50);
-  if (lightLevel < 2000) {
-    // white backlight for readability at night
-    pixels.fill(pixels.Color(32, 32, 32));
-  } else if (state.active_state == STATE_CITY) {
-    pixels.fill(pixels.Color(0, 0, 64));
-  } else {
-    pixels.fill(pixels.Color(0, 64, 0));
-  }
-  if (lastButtonPress.a) {
-    pixels.setPixelColor(3, 255, 0, 0);
-  }
-  if (lastButtonPress.b) {
-    pixels.setPixelColor(2, 0, 255, 0);
-  }
-  if (lastButtonPress.c) {
-    pixels.setPixelColor(1, 0, 0, 255);
-  }
-  if (lastButtonPress.d) {
-    pixels.setPixelColor(0, 255,255,255);
-  }
-  pixels.show();
-}
-
-
 void updateState() {
-  if (lightLevelDelay.isExpired()) {
-    // turn off the backlight for a true reading of ambient
-    pixels.setBrightness(0);
-    pixels.fill(0);
-    pixels.show();
-
-    lightLevel = analogRead(LIGHT_SENSOR);
-
-    // turn the pixels back on (at appropriate brightness!)
-    updatePixels();
-
-    if (lightLevelFeedDelay.isExpired() && mqtt.connected()) {
-      lightLevelFeed.publish(lightLevel);
-      lightLevelFeedDelay.restart();
-    }
-    lightLevelDelay.restart();
-  }
-#ifdef RAIN_CLIENT
+#ifdef RAINGAUGE_V2
   if (lastLevelReading.isExpired()) {
     // use .repeat() to ensure our filter bandwidth is relatively constant
     // even if there's a (slow) display refresh between samples
@@ -768,7 +790,10 @@ void updateState() {
     for (int i=0; i<2; i++) {
       level_accum[i] =
         ((int64_t)level_accum[i] * (LEVEL_SAMPLE_FILTER-1) / LEVEL_SAMPLE_FILTER)
-        + ads1115.readADC_SingleEnded(i);
+#ifdef ADC_CONNECTED
+        + ads1115.readADC_SingleEnded(i)
+#endif
+          ;
       raw_level[i] = level_accum[i] / LEVEL_SAMPLE_FILTER;
       state.water_level[i] = (raw_level[i] - WATER_READING_ZERO) * 1000
         / (WATER_READING_FULL - WATER_READING_ZERO);
@@ -798,7 +823,7 @@ void updateState() {
     sendUpdate();
   }
 #endif
-#ifdef RAIN_SERVER
+#ifdef RAINPUMP_V2
   // read flow meter at intervals
   if (flowMeterInterval.isExpired()) {
     flowMeterInterval.repeat();
@@ -831,7 +856,7 @@ void updateState() {
       }
   }
   // read our pipe water sensor
-  state.pipe_water_present = !digitalRead(WATER_GPIO);
+  state.pipe_water_present = !digitalRead(WATER_SENSE);
 
   // implement "auto" mode
   if (state.user_state != STATE_AUTO) {
@@ -920,17 +945,14 @@ void updateDisplay() {
   displayMaxRefresh.restart();
   last_displayed_state = state;
 
-  // make neopixel color match the user state
-  updatePixels();
-
   boolean client_connected_recently = true;
-#ifdef RAIN_CLIENT
+#ifdef RAINGAUGE_V2
   client_connected_recently = state.connected_recently;
 #endif
 
-  display.clearBuffer();
+  display.clearDisplay();
   normalface();
-  display.setTextColor(EPD_DARK);
+  display.setTextColor(COLOR3);
   display.setCursor(4, 17);
   display.setTextSize(1);
   display.print(WiFi.localIP());
@@ -946,18 +968,18 @@ void updateDisplay() {
     int y = BAR_TOP + i * BAR_SPACE;
     int amount = state.water_level[i] * (BAR_WIDTH - 2) / 1000;
     display.setCursor(x - 16, y + (BAR_HEIGHT / 2) + 6);
-    display.setTextColor(EPD_DARK);
+    display.setTextColor(COLOR3);
     rightjustify(i == 0 ? "1:" : "2:");
-    display.fillRect(x, y, BAR_WIDTH, BAR_HEIGHT, EPD_BLACK);
-    display.fillRect(x + 1, y + 1, BAR_WIDTH - 2, BAR_HEIGHT - 2, EPD_WHITE);
-#ifdef RAIN_SERVER
+    display.fillRect(x, y, BAR_WIDTH, BAR_HEIGHT, COLOR4);
+    display.fillRect(x + 1, y + 1, BAR_WIDTH - 2, BAR_HEIGHT - 2, COLOR1);
+#ifdef RAINPUMP_V2
     if (!state.connected_recently) {
       // no recent water level data
       continue;
     }
 #endif
-    display.fillRect(x + 1, y + 1, amount, BAR_HEIGHT - 2, EPD_LIGHT); // the actual graph amount
-    display.setTextColor(EPD_BLACK);
+    display.fillRect(x + 1, y + 1, amount, BAR_HEIGHT - 2, COLOR2); // the actual graph amount
+    display.setTextColor(COLOR4);
     display.setCursor(x + (BAR_WIDTH / 2), y + (BAR_HEIGHT / 2));
     boldface();
     char buf[20];
@@ -969,25 +991,25 @@ void updateDisplay() {
 #define BUTTON_HEIGHT 28
   if (client_connected_recently) {
     display.fillRect(state.user_state * display.width() / 4, display.height() - BUTTON_HEIGHT,
-                     display.width() / 4, BUTTON_HEIGHT, EPD_LIGHT);
+                     display.width() / 4, BUTTON_HEIGHT, COLOR2);
   }
-  display.drawFastHLine(0, display.height() - BUTTON_HEIGHT, display.width(), EPD_DARK);
+  display.drawFastHLine(0, display.height() - BUTTON_HEIGHT, display.width(), COLOR3);
   for (int i = 0; i < 3; i++) {
-    display.drawFastVLine((i + 1)*display.width() / 4, display.height() - BUTTON_HEIGHT, BUTTON_HEIGHT, EPD_DARK);
+    display.drawFastVLine((i + 1)*display.width() / 4, display.height() - BUTTON_HEIGHT, BUTTON_HEIGHT, COLOR3);
   }
   for (int i = 0; i < 3; i++) {
     display.setCursor((2 * i + 1)*display.width() / 8, display.height() - BUTTON_HEIGHT / 2);
     if (!client_connected_recently) {
-      display.setTextColor(EPD_LIGHT);
+      display.setTextColor(COLOR2);
       normalface();
     } else if (i == state.user_state) {
-      display.setTextColor(EPD_BLACK);
+      display.setTextColor(COLOR4);
       boldface();
     } else {
       if (i == state.active_state) {
-        display.setTextColor(EPD_BLACK);
+        display.setTextColor(COLOR4);
       } else {
-        display.setTextColor(EPD_DARK);
+        display.setTextColor(COLOR3);
       }
       normalface();
     }
@@ -995,9 +1017,9 @@ void updateDisplay() {
   }
 #define BITMAP4(x, y, w, h, num) BITMAP4_(x,y,w,h,num) // need to expand the _NUM macro before pasting
 #define BITMAP4_(x, y, w, h, num) do {\
-    display.drawBitmap(x, y, LightBitmap ## num, w, h, EPD_LIGHT); \
-    display.drawBitmap(x, y, DarkBitmap ## num, w, h, EPD_DARK); \
-    display.drawBitmap(x, y, BlackBitmap ## num, w, h, EPD_BLACK); \
+    display.drawBitmap(x, y, LightBitmap ## num, w, h, COLOR2); \
+    display.drawBitmap(x, y, DarkBitmap ## num, w, h, COLOR3); \
+    display.drawBitmap(x, y, BlackBitmap ## num, w, h, COLOR4); \
   } while(false)
 
   if (state.user_state == STATE_AUTO && state.active_state == STATE_CITY && client_connected_recently) {
@@ -1044,38 +1066,7 @@ void updateDisplay() {
   display.display(); // or partial update?
 }
 
-#ifdef ENABLE_AUDIO
-uint32_t audio_pointer = 0;
-bool audio_playing = false;
-AsyncDelay audioDelay = AsyncDelay(1000000L / SAMPLE_RATE, AsyncDelay::MICROS);
-void start_audio() {
-  audio_pointer = 0;
-  audio_playing = true;
-  audioDelay.restart();
-  digitalWrite(SPEAKER_SHUTDOWN, HIGH);
-}
-void play_audio() {
-  if (audio_pointer >= sizeof(audio)) {
-    audio_playing = false;
-    digitalWrite(SPEAKER_SHUTDOWN, LOW);
-  } else if (audioDelay.isExpired()) {
-    if (audio_pointer == 0) {
-      audioDelay.restart();
-    } else {
-      audioDelay.repeat();
-    }
-    dacWrite(A0, audio[audio_pointer++]);
-  }
-}
-#endif /* ENABLE_AUDIO */
-
 void loop() {
-#ifdef ENABLE_AUDIO
-  if (audio_playing) {
-    play_audio();
-    return;
-  }
-#endif
   ArduinoOTA.handle();
   if (connectionWatchdog.isExpired()) {
     delay(5000);
@@ -1090,63 +1081,20 @@ void loop() {
   }
   // Update user state via buttons
   ButtonPress button_press;
-  if (!debounceDelay.isExpired()) {
-    // don't process additional button presses while debouncing
-  } else {
-    if (! digitalRead(BUTTON_A)) {
-      button_press.a = true;
-    }
-    if (! digitalRead(BUTTON_B)) {
-      button_press.b = true;
-    }
-    if (! digitalRead(BUTTON_C)) {
-      button_press.c = true;
-    }
-    if (! digitalRead(BUTTON_D)) {
-      button_press.d = true;
-    }
-#ifdef RAIN_CLIENT
-    if (capReadInterval.isExpired()) { // don't clog up the I2C
+  if (capReadInterval.isExpired()) { // don't clog up the I2C
       capReadInterval.restart();
-      capTouch.readTouchInputs();
-      if (capTouch.touched(0)) {
-        button_press.a = true;
-      }
-      if (capTouch.touched(1)) {
-        button_press.b = true;
-      }
-      if (capTouch.touched(2)) {
-        button_press.c = true;
-      }
-      if (capTouch.touched(3)) {
-        button_press.d = true;
-      }
-    } else {
+      cap1298_read_buttons(&button_press);
+  } else {
       button_press = lastButtonPress;
-    }
-#endif
-    bool buttons_pressed =
-      button_press.a || button_press.b || button_press.c || button_press.d;
-    bool buttons_changed = !(lastButtonPress == button_press);
-    lastButtonPress = button_press;
-    if (buttons_changed) {
-      updatePixels(); // show button press!
-    }
-    if (buttons_pressed) {
-      debounceDelay.restart();
-#ifdef ENABLE_AUDIO
-      start_audio();
-#endif
-    }
-  }
-#ifdef RAIN_SERVER
-  server.handleClient();
-  if (WiFi.isConnected()) {
-    connectionWatchdog.restart();
   }
 #ifdef DISABLE_BUTTONS
   button_press = ButtonPress();
 #endif
+#ifdef RAINPUMP_V2
+  server.handleClient();
+  if (WiFi.isConnected()) {
+    connectionWatchdog.restart();
+  }
   // Update user state via buttons
   if (button_press.a) {
     state.user_state = STATE_CITY;
@@ -1159,11 +1107,8 @@ void loop() {
   }
   updateState(); // read various sensors
 #endif
-#ifdef RAIN_CLIENT
+#ifdef RAINGAUGE_V2
   // read buttons, if pressed immediately sent a ?state= request to the server and expire lastPing()
-#ifdef DISABLE_BUTTONS
-  button_press = ButtonPress();
-#endif
   if (button_press.a) {
     sendUpdate(STATE_CITY);
     displayMaxRefresh.expire();
@@ -1183,4 +1128,4 @@ void loop() {
   updateDisplay(); // possibly update display if state has changed
 }
 
-#endif /* RAIN_SERVER || RAIN_CLIENT */
+#endif /* RAINPUMP_V2 || RAINGAUGE_V2 */
