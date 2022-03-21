@@ -239,23 +239,29 @@ void ST7529_LCD::setContrast(uint8_t level) {
 
 /** Push data currently in RAM to display. */
 void ST7529_LCD::display(void) {
+    if (window_x2 < 0 || window_y2 < 0) {
+        return; // window isn't dirty yet
+    }
     // ESP8266 needs a periodic yield() call to avoid watchdog reset.
     yield();
-    // Write entire buffer (XXX speed this up!)
+    // Write dirty region
+    window_x1 /= 3;
+    window_x2 /= 3;
     lcdWrite( COMMAND0, 0x0015 ); // Column address set
-    lcdWrite( DATA, 0 );
-    lcdWrite( DATA, 79 );
+    lcdWrite( DATA, window_x1 );
+    lcdWrite( DATA, window_x2 );
     lcdWrite( COMMAND0, 0x0075 ); // Line address set
-    lcdWrite( DATA, 0 ); // From line 0
-    lcdWrite( DATA, 127 ); // To line 119
+    lcdWrite( DATA, window_y1 ); // From line 0
+    lcdWrite( DATA, window_y2 ); // To line 119
     lcdWrite( COMMAND0, 0x05C );
-    int i=0;
-    for (int y = 0; y < HEIGHT; y++) {
+
+    for (int y = window_y1; y <= window_y2; y++) {
         ESP.wdtFeed();
-        for (int x = 0; x < WIDTH; x+=3) {
-            lcdWrite( DATA, buffer[i++] );
-            lcdWrite( DATA, buffer[i++] );
-            lcdWrite( DATA, buffer[i++] );
+        uint8_t *b = buffer + (window_x1*3) + (y*WIDTH);
+        for (int x = window_x1; x <= window_x2; x++) {
+            lcdWrite( DATA, *b++ );
+            lcdWrite( DATA, *b++ );
+            lcdWrite( DATA, *b++ );
         }
     }
 
