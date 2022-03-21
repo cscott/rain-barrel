@@ -32,19 +32,37 @@ void lcdWrite( write_type_t type, uint16_t value) {
   spi_txd(HSPI, 9, data);
 }
 
+void ST7529_ReadEEPROM( void ) {
+    lcdWrite( COMMAND, 0x0030 ); // EXT = 0
+    lcdWrite( COMMAND, 0x0007 ); // Initial code (1)
+    lcdWrite( DATA, 0x0019 );
+    lcdWrite( COMMAND, 0x0031 ); // EXT = 1
+    lcdWrite( COMMAND, 0x00CD ); // EEPROM ON
+    lcdWrite( DATA, 0x0000 ); // Enter "Read Mode"
+    delay( 100 ); // Wait for EEPROM operation (100ms)
+    lcdWrite( COMMAND, 0x00FD ); // Start EEPROM reading operation
+    delay( 100 ); // Wait for EEPROM operation (100ms)
+    lcdWrite( COMMAND, 0x00CC ); // Exit EEPROM mode
+    lcdWrite( COMMAND, 0x0030 ); // EXT = 0
+}
+
 // Initialize 240x120 greyscale display @ 14.5V
 void ST7529_Init( void )
 {
     delay(1); // wait for power to stabilize
+    lcdWrite( COMMAND, 0x0025 ); // NOP
+    lcdWrite( COMMAND, 0x0025 ); // NOP
     lcdWrite( COMMAND, 0x0030 ); // Set Ext = 0
     lcdWrite( COMMAND, 0x0094 ); // Exit sleep mode (SLPOUT)
-    lcdWrite( COMMAND, 0x00D1 ); // Internall Oscillator On (OSCON)
+    lcdWrite( COMMAND, 0x00D1 ); // Internal Oscillator On (OSCON)
     lcdWrite( COMMAND, 0x0020 ); // Power control set (PWRCTRL)
     lcdWrite( DATA, 0x0008 ); // (Booster on, follower and reference off)
-    delay( 1 ); // Booster must be on first before other power enabled
+    delay( 5 ); // Booster must be on first before other power enabled
     lcdWrite( COMMAND, 0x0020 ); // Power control set (PWRCTRL)
-    lcdWrite( DATA, 0x000B ); //OSC On (booster, follower & reference on)
+    lcdWrite( DATA, 0x000B ); // (booster, follower & reference on)
+    delay( 5 ); // Booster must be on first before other power enabled
 
+    // "write contrast"
     lcdWrite( COMMAND, 0x0081 ); // Program optimum LCD supply voltage (VOLCTRL)
     lcdWrite( DATA, 0x0010 ); // VPR = 0b1 0001 0000 = 0x110 => 14.48V
     lcdWrite( DATA, 0x0004 ); // (Reset state is 0x101 => Vop = 13.88V)
@@ -72,7 +90,20 @@ void ST7529_Init( void )
     lcdWrite( DATA, 0x0001 ); // Booster Efficiency = 01 (default, 6kHz)
     lcdWrite( DATA, 0x0002 ); // Bias = 1/12
     lcdWrite( COMMAND, 0x0034 ); // Software Initial (SWINT)
-    //ReadEEPROM(); // Read EEPROM Flow
+
+    // Gray table
+    lcdWrite( COMMAND, 0x0034 ); // Software Initial (SWINT)
+    lcdWrite( COMMAND, 0x0020 ); // Gray 1 set
+    for (int i=0; i < 32; i+= 2) {
+        lcdWrite( DATA, i);
+    }
+    lcdWrite( COMMAND, 0x0021 ); // Gray 2 set
+    for (int i=0; i < 32; i+= 2) {
+        lcdWrite( DATA, i);
+    }
+
+    //ST7529_ReadEEPROM(); // Read EEPROM Flow
+
     lcdWrite( COMMAND, 0x0030 ); // Set Ext = 0
     lcdWrite( COMMAND, 0x00AF ); // Display On (DISON)
 }
@@ -84,6 +115,7 @@ bool initializeLCD() {
     // https://www.crystalfontz.com/controllers/Sitronix/ST7529/
     // IF1=L IF2=L IF3=H (9-bit serial, 3 line)
     ST7529_Init();
+    delay( 1 ); // Booster must be on first before other power enabled
     // Display a pattern
     uint8_t i,j;
     lcdWrite( COMMAND, 0x0030 ); // Set Ext = 0
@@ -96,12 +128,14 @@ bool initializeLCD() {
     lcdWrite( COMMAND, 0x005C ); // Display Data Write
     for( j = 0; j < 120 ; j++ ) {
         for( i = 0 ; i < 79 ; i++ ) {
-            lcdWrite( DATA, 0 );
+            lcdWrite( DATA, (i&1) ? 0 : 0xFF );
             lcdWrite( DATA, i*31/78 );
             lcdWrite( DATA, j*31/119 );
         }
     }
     return true;
+    // LCD WIDTH 244
+    // LCD HEIGHT = 68
 }
 
 void setup() {
@@ -116,7 +150,8 @@ void setup() {
   pinMode(WATER_SENSE, INPUT_PULLUP);
   pinMode(PRESSURE_SW_IN, INPUT_PULLUP);
   pinMode(PUMP_CNTRL, OUTPUT);
-  spi_init(HSPI);
+  spi_init(HSPI); // 4MHz
+  spi_mode(HSPI, 1, 1);
 
   Serial.println("LCD tester");
   Serial.println();
