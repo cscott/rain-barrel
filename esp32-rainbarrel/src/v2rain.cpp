@@ -71,8 +71,8 @@
 #define TICKS_PER_GALLON 3673.4
 
 #define COLOR1 0x00 // was: EPD_WHITE
-#define COLOR2 0xA0 // was: EPD_LIGHT
-#define COLOR3 0xC0 // was: EPD_DARK
+#define COLOR2 0x7F // was: EPD_LIGHT
+#define COLOR3 0xBF // was: EPD_DARK
 #define COLOR4 0xFF // was: EPD_BLACK
 
 // General note: Most (or all?) of the intervals below have small offsets added

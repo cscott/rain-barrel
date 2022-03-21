@@ -9,6 +9,8 @@
 #define COMMAND1 1
 #define DATA     2
 
+#define BPP 2 /* could be 1/2/4/8 */
+
 ST7529_LCD::ST7529_LCD(uint16_t w, uint16_t h, int8_t rst_pin)
     : Adafruit_GFX(w, h), rstPin(rst_pin) {
 }
@@ -34,7 +36,7 @@ bool ST7529_LCD::begin(void) {
 bool ST7529_LCD::_init(void) {
     // attempt to malloc the bitmap framebuffer
     if ((!buffer) &&
-        !(buffer = (uint8_t *)malloc(WIDTH * HEIGHT))) {
+        !(buffer = (uint8_t *)malloc(WIDTH * HEIGHT / (8/BPP)))) {
         return false;
     }
     // Set up pins
@@ -151,7 +153,16 @@ void ST7529_LCD::drawPixel(int16_t x, int16_t y, uint16_t color) {
         window_x2 = max(window_x2, x);
         window_y2 = max(window_y2, y);
 
-        buffer[x + y*WIDTH] = (color&0xFF);
+        int idx = x + y*WIDTH;
+#if BPP < 8
+        uint8_t lowbits = idx & ((8/BPP)-1);
+        uint8_t new_pixel = (color >> (8-BPP)) << (lowbits*BPP);
+        uint8_t mask = (0xFF >> (8-BPP)) << (lowbits*BPP);
+        uint8_t old_pixels = buffer[idx/(8/BPP)] & (~mask);
+        buffer[idx/(8/BPP)] = old_pixels | new_pixel;
+#else
+        buffer[idx] = (color&0xFF);
+#endif
     }
 }
 
@@ -162,7 +173,7 @@ void ST7529_LCD::drawPixel(int16_t x, int16_t y, uint16_t color) {
             commands as needed by one's own application.
 */
 void ST7529_LCD::clearDisplay(void) {
-    memset(buffer, 0, WIDTH * HEIGHT);
+    memset(buffer, 0, WIDTH * HEIGHT / (8/BPP));
     // set max dirty window
     window_x1 = 0;
     window_y1 = 0;
@@ -197,7 +208,14 @@ uint16_t ST7529_LCD::getPixel(int16_t x, int16_t y) {
             y = HEIGHT - y - 1;
             break;
         }
-        return buffer[x + y*WIDTH];
+        int idx = x + y*WIDTH;
+#if BPP < 8
+        uint8_t pixel = buffer[idx/(8/BPP)];
+        uint8_t lowbits = idx & ((8/BPP)-1);
+        return (pixel >> (lowbits*BPP)) << (8-BPP);
+#else
+        return buffer[idx];
+#endif
     }
     return 0; // Pixel out of bounds
 }
@@ -257,12 +275,28 @@ void ST7529_LCD::display(void) {
 
     for (int y = window_y1; y <= window_y2; y++) {
         ESP.wdtFeed();
-        uint8_t *b = buffer + (window_x1*3) + (y*WIDTH);
+        int idx = window_x1*3 + y*WIDTH;
+        uint8_t *b = buffer + idx/(8/BPP);
+#if BPP < 8
+        uint8_t lowbits = idx & ((8/BPP)-1);
+        uint8_t pixel = *b++;
+        for (int x = window_x1; x <= window_x2; x++) {
+            for (int j=0; j<3; j++) {
+                lcdWrite( DATA, (pixel >> (lowbits*BPP)) << (8-BPP));
+                lowbits++;
+                if (lowbits >= (8/BPP)) {
+                    lowbits = 0;
+                    pixel = *b++;
+                }
+            }
+        }
+#else
         for (int x = window_x1; x <= window_x2; x++) {
             lcdWrite( DATA, *b++ );
             lcdWrite( DATA, *b++ );
             lcdWrite( DATA, *b++ );
         }
+#endif
     }
 
     // Reset dirty window
