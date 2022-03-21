@@ -9,11 +9,15 @@
 #include <ArduinoOTA.h>
 #include <Adafruit_GFX.h>
 
-#define HAS_OLED
+//#define HAS_OLED
+#define HAS_ST7529
 
 // includes for OLED display
 #ifdef HAS_OLED
 #include <Adafruit_SH110X.h> // I2C 0x3C
+#endif
+#ifdef HAS_ST7529
+#include "st7529.h"
 #endif
 
 #include "config.h"
@@ -28,11 +32,19 @@
 #ifdef HAS_OLED
 // Configuration of OLED display
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
+#define WHITE SH110X_WHITE
+#define BLACK SH110X_BLACK
 
 // OLED FeatherWing buttons map to different pins depending on board:
 #define BUTTON_A  0
 #define BUTTON_B 16
 #define BUTTON_C  2
+#endif
+
+#ifdef HAS_ST7529
+ST7529_LCD display = ST7529_LCD();
+#define WHITE ST7529_BLACK
+#define BLACK ST7529_WHITE
 #endif
 
 // Other config
@@ -50,12 +62,12 @@ AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
 bool blinkWasOn = false;
 bool mdns_success;
 
-#ifdef HAS_OLED
+#if defined(HAS_OLED) || defined(HAS_ST7529)
 void normalText() {
-  display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  display.setTextColor(WHITE, BLACK);
 }
 void invertText() {
-  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setTextColor(BLACK, WHITE);
 }
 void maybeInvertText(bool maybe) {
   if (maybe) invertText(); else normalText();
@@ -102,6 +114,11 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
+  digitalWrite(LCD_CS, 1);
+  pinMode(LCD_CS, OUTPUT);
+  digitalWrite(LCD_RST, 0);
+  pinMode(LCD_RST, OUTPUT);
+
 #ifdef HAS_OLED
   // OLED setup
   display.begin(0x3C, true); // Address 0x3C default
@@ -109,11 +126,12 @@ void setup() {
   pinMode(BUTTON_B, INPUT_PULLUP);
   pinMode(BUTTON_C, INPUT_PULLUP);
 #endif
+#ifdef HAS_ST7529
+  bool st = display.begin();
+  Serial.print("Display begin: ");
+  Serial.println(st);
+#endif
 
-  digitalWrite(LCD_CS, 1);
-  pinMode(LCD_CS, OUTPUT);
-  digitalWrite(LCD_RST, 0);
-  pinMode(LCD_RST, OUTPUT);
   pinMode(WATER_SENSE, INPUT_PULLUP);
   pinMode(PRESSURE_SW_IN, INPUT_PULLUP);
   pinMode(PUMP_CNTRL, OUTPUT);
@@ -147,20 +165,25 @@ void setup() {
   // Recalibrate all channels now.
   writeRegister(CAP1298_I2C_ADDR, CAP1298_REG_CALIBRATION, 0x1F);
 
-#ifdef HAS_OLED
+#if defined(HAS_OLED) || defined(HAS_ST7529)
   // Clear the buffer.
   display.clearDisplay();
+#ifdef HAS_OLED
   display.setRotation(1);
+#endif
 
   display.setTextSize(1);
   display.setCursor(0,0);
 
   invertText();
   display.println("Rainbarrel V2 tester");
+  Serial.println("Rainbarrel V2 tester");
   normalText();
 
   display.println("");
+  Serial.println();
   display.print("Connecting to SSID\n" WIFI_SSID ": ");
+  Serial.print("Connecting to SSID\n" WIFI_SSID ": ");
   display.display();
 #endif
 
@@ -169,7 +192,7 @@ void setup() {
     delay(500);
     Serial.print(".");
   }
-#ifdef HAS_OLED
+#if defined(HAS_OLED) || defined(HAS_ST7529)
   display.clearDisplay();
   display.setCursor(0,0);
   display.print("IP: ");
@@ -181,7 +204,7 @@ void setup() {
   if (MDNS.begin(MDNS_NAME)) {
     mdns_success = true;
     Serial.println("MDNS responder started: " MDNS_NAME);
-#ifdef HAS_OLED
+#if defined(HAS_OLED) || defined(HAS_ST7529)
     display.println("mDNS: " MDNS_NAME);
     display.display();
 #endif
@@ -221,7 +244,7 @@ void setup() {
 }
 
 void updateDisplay(bool blink) {
-#ifdef HAS_OLED
+#if defined(HAS_OLED) || defined(HAS_ST7529)
     uint8_t nBytes, status, val;
 
   display.clearDisplay();
