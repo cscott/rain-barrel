@@ -38,7 +38,7 @@ bool ST7529_LCD::_init(void) {
         return false;
     }
     // Set up pins
-    delay(1); // XXX needed?
+    delay(10); // XXX needed?
     if (rstPin >= 0) {
         digitalWrite(rstPin, 0);
         pinMode(rstPin, OUTPUT);
@@ -46,9 +46,9 @@ bool ST7529_LCD::_init(void) {
     spi_init(HSPI); // 4 MHz
     spi_mode(HSPI, 1, 1);
     if (rstPin >= 0) {
-        delayMicroseconds(1);
+        delay(1);//delayMicroseconds(1);
         digitalWrite(rstPin, 1);
-        delayMicroseconds(2);
+        delay(2);//delayMicroseconds(2);
     }
     // Initialize hardware
     ext_mode = 0;
