@@ -40,10 +40,11 @@ Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
 #define LED_OFF 1 // active low
 #define LED_ON  0 // active low
 
-#define LCD_CS 2 // F0
-#define WATER_SENSE 16      // F1 (water present)
+#define LCD_CS 15 // F3
+#define LCD_RST 2 // F0
+#define WATER_SENSE 12      // F5 (water present) (also MISO)
 #define PUMP_CNTRL 0      // F2 (power tail out)
-#define PRESSURE_SW_IN 15 // F3 (pressure switch input)
+#define PRESSURE_SW_IN 16 // F1 (pressure switch input)
 
 AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
 bool blinkWasOn = false;
@@ -111,6 +112,8 @@ void setup() {
 
   digitalWrite(LCD_CS, 1);
   pinMode(LCD_CS, OUTPUT);
+  digitalWrite(LCD_RST, 0);
+  pinMode(LCD_RST, OUTPUT);
   pinMode(WATER_SENSE, INPUT_PULLUP);
   pinMode(PRESSURE_SW_IN, INPUT_PULLUP);
   pinMode(PUMP_CNTRL, OUTPUT);

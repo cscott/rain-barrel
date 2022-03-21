@@ -6,7 +6,14 @@
 #include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
 
-#include <driver/spi.h> // At the moment this is incompatible with standard SPI
+#define HARDWARE_SPI
+
+#ifdef HARDWARE_SPI
+# include <driver/spi.h> // At the moment this is incompatible with standard SPI
+#else
+# define LCD_SI 13 /* MOSI */
+# define LCD_SCL 14 /* SCK */
+#endif
 
 #include "config.h"
 #define MDNS_NAME "flowtester" // keep same name as flowtester
@@ -15,10 +22,16 @@
 #define LED_OFF 1 // active low
 #define LED_ON  0 // active low
 
-#define LCD_CS 2 // F0
-#define WATER_SENSE 16      // F1 (water present)
+#define LCD_CS 15 // F3
+#define LCD_RST 2 // F0
+#define WATER_SENSE 12      // F5 (water present) (also MISO)
 #define PUMP_CNTRL 0      // F2 (power tail out)
-#define PRESSURE_SW_IN 15 // F3 (pressure switch input)
+#define PRESSURE_SW_IN 16 // F1 (pressure switch input)
+
+#define LCD_COLS 240
+#define LCD_ROWS 128
+
+uint8_t framebuffer[LCD_COLS * LCD_ROWS] = { 0 };
 
 AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
 bool blinkWasOn = false;
@@ -26,11 +39,32 @@ bool mdns_success;
 
 typedef enum { COMMAND, DATA } write_type_t;
 
+#ifdef HARDWARE_SPI
 void lcdWrite( write_type_t type, uint16_t value) {
   uint32_t data = value & 0xFF;
   if (type==DATA) { data |= 0x100; }
   spi_txd(HSPI, 9, data);
 }
+#else
+void lcdWrite( write_type_t type, uint16_t value) {
+    digitalWrite(LCD_SCL, 1);
+    digitalWrite(LCD_CS, 0);
+    digitalWrite(LCD_SI, (type==DATA) ? 1 : 0);
+    digitalWrite(LCD_SCL, 0);
+    delayMicroseconds(1);
+    digitalWrite(LCD_SCL, 1); // Latch at rising edge
+    delayMicroseconds(1);
+    for (int i=0; i<8; i++) {
+        digitalWrite(LCD_SCL, 0);
+        digitalWrite(LCD_SI, (value & 0x80) ? 1 : 0); // MSB first
+        value = value << 1;
+        delayMicroseconds(1);
+        digitalWrite(LCD_SCL, 1); // Latch at rising edge
+        delayMicroseconds(1);
+    }
+    digitalWrite(LCD_CS, 1);
+}
+#endif
 
 void ST7529_ReadEEPROM( void ) {
     lcdWrite( COMMAND, 0x0030 ); // EXT = 0
@@ -49,7 +83,10 @@ void ST7529_ReadEEPROM( void ) {
 // Initialize 240x120 greyscale display @ 14.5V
 void ST7529_Init( void )
 {
-    delay(1); // wait for power to stabilize
+    digitalWrite(LCD_RST, 0);
+    delayMicroseconds(1);
+    digitalWrite(LCD_RST, 1);
+    delayMicroseconds(2);
     lcdWrite( COMMAND, 0x0025 ); // NOP
     lcdWrite( COMMAND, 0x0025 ); // NOP
     lcdWrite( COMMAND, 0x0030 ); // Set Ext = 0
@@ -87,25 +124,69 @@ void ST7529_Init( void )
     lcdWrite( COMMAND, 0x0031 ); // Set Ext = 1
     lcdWrite( COMMAND, 0x0032 ); // Analog Circuit Set (ANASET)
     lcdWrite( DATA, 0x0000 ); // OSC Frequency = 000 (default, 12.7kHz)
-    lcdWrite( DATA, 0x0001 ); // Booster Efficiency = 01 (default, 6kHz)
+    lcdWrite( DATA, 0x0000 ); // Booster Efficiency = 00 (3kHz)
     lcdWrite( DATA, 0x0002 ); // Bias = 1/12
     lcdWrite( COMMAND, 0x0034 ); // Software Initial (SWINT)
 
-    // Gray table
-    lcdWrite( COMMAND, 0x0034 ); // Software Initial (SWINT)
-    lcdWrite( COMMAND, 0x0020 ); // Gray 1 set
-    for (int i=0; i < 32; i+= 2) {
-        lcdWrite( DATA, i);
-    }
-    lcdWrite( COMMAND, 0x0021 ); // Gray 2 set
-    for (int i=0; i < 32; i+= 2) {
-        lcdWrite( DATA, i);
-    }
-
-    //ST7529_ReadEEPROM(); // Read EEPROM Flow
-
+    // Reset scroll
     lcdWrite( COMMAND, 0x0030 ); // Set Ext = 0
+    lcdWrite( COMMAND, 0x00AB );
+    lcdWrite( DATA, 36 ); // Initial scroll position
+    // Invert display
+    lcdWrite( COMMAND, 0x00A7 );
+    // Display on
     lcdWrite( COMMAND, 0x00AF ); // Display On (DISON)
+}
+
+void ST7529_Clear() {
+    lcdWrite( COMMAND, 0x0030 ); // Set Ext = 0
+    lcdWrite( COMMAND, 0x0015 ); // Column address set
+    lcdWrite( DATA, 0 );
+    lcdWrite( DATA, 79 );
+    lcdWrite( COMMAND, 0x0075 ); // Line address set
+    lcdWrite( DATA, 0 ); // From line 0
+    lcdWrite( DATA, 127 ); // To line 119
+    lcdWrite( COMMAND, 0x05C );
+    for (size_t i=0; i < sizeof(framebuffer); i++) {
+        framebuffer[i] = 0;
+    }
+    for (int y = 0; y < LCD_ROWS; y++) {
+        ESP.wdtFeed();
+        for (int x = 0; x < LCD_COLS; x+=3) {
+            lcdWrite( DATA, 0 );
+            lcdWrite( DATA, 0 );
+            lcdWrite( DATA, 0 );
+        }
+    }
+}
+
+void ST7529_SetPixel(uint8_t x, uint8_t y, uint8_t level) {
+    level = level << 3;
+    lcdWrite( COMMAND, 0x0030 ); // Set Ext = 0
+    lcdWrite( COMMAND, 0x0015 ); // Column address set
+    lcdWrite( DATA, x / 3 );
+    lcdWrite( DATA, 79 );
+    lcdWrite( COMMAND, 0x0075 ); // Page address set
+    lcdWrite( DATA, y ); // From line 0
+    lcdWrite( DATA, 127 ); // To line 127
+    framebuffer[x + (y*LCD_COLS)] = level;
+    lcdWrite( COMMAND, 0x05C );
+    for (int i=0; i<3; i++) {
+        uint8_t pixel = framebuffer[(x/3)*3 + (y*LCD_COLS) + i];
+        lcdWrite( DATA, pixel );
+    }
+}
+
+void ST7529_Diagonal() {
+    for (int i=0; i<LCD_ROWS && i<LCD_COLS; i++) {
+        ST7529_SetPixel(i, i, 0x1F);
+    }
+    for (int i=0; i<LCD_COLS; i++) {
+        ST7529_SetPixel(i, 0, 0x1F);
+    }
+    for (int i=0; i<LCD_ROWS; i++) {
+        ST7529_SetPixel(0, i, 0x1F);
+    }
 }
 
 bool initializeLCD() {
@@ -114,28 +195,13 @@ bool initializeLCD() {
     // ST7529 driver chip
     // https://www.crystalfontz.com/controllers/Sitronix/ST7529/
     // IF1=L IF2=L IF3=H (9-bit serial, 3 line)
+    delay(1); // wait for power to stabilize
     ST7529_Init();
-    delay( 1 ); // Booster must be on first before other power enabled
+    // Clear screen
+    ST7529_Clear();
     // Display a pattern
-    uint8_t i,j;
-    lcdWrite( COMMAND, 0x0030 ); // Set Ext = 0
-    lcdWrite( COMMAND, 0x0015 ); // Column address set
-    lcdWrite( DATA, 0x0000 ); // From column 0
-    lcdWrite( DATA, 0x004F ); // To column 240 (aka 240/3 - 1)
-    lcdWrite( COMMAND, 0x0075 ); // Page address set
-    lcdWrite( DATA, 0x0000 ); // From line 0
-    lcdWrite( DATA, 0x0077 );  // To line 119
-    lcdWrite( COMMAND, 0x005C ); // Display Data Write
-    for( j = 0; j < 120 ; j++ ) {
-        for( i = 0 ; i < 79 ; i++ ) {
-            lcdWrite( DATA, (i&1) ? 0 : 0xFF );
-            lcdWrite( DATA, i*31/78 );
-            lcdWrite( DATA, j*31/119 );
-        }
-    }
+    ST7529_Diagonal();
     return true;
-    // LCD WIDTH 244
-    // LCD HEIGHT = 68
 }
 
 void setup() {
@@ -147,11 +213,20 @@ void setup() {
 
   digitalWrite(LCD_CS, 1);
   pinMode(LCD_CS, OUTPUT);
+  digitalWrite(LCD_RST, 0);
+  pinMode(LCD_RST, OUTPUT);
   pinMode(WATER_SENSE, INPUT_PULLUP);
   pinMode(PRESSURE_SW_IN, INPUT_PULLUP);
   pinMode(PUMP_CNTRL, OUTPUT);
+#ifdef HARDWARE_SPI
   spi_init(HSPI); // 4MHz
   spi_mode(HSPI, 1, 1);
+#else
+  digitalWrite(LCD_SI, 0);
+  pinMode(LCD_SI, OUTPUT);
+  digitalWrite(LCD_SCL, 0);
+  pinMode(LCD_SCL, OUTPUT);
+#endif
 
   Serial.println("LCD tester");
   Serial.println();
