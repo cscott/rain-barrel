@@ -118,7 +118,7 @@ AsyncDelay capReadInterval = AsyncDelay(50 + 3, AsyncDelay::MILLIS); // read @ 2
 WiFiClientSecure client;
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
-AsyncDelay mqttDelay = AsyncDelay(5000 + 3, AsyncDelay::MILLIS); // retry every 5 seconds if not connected
+AsyncDelay mqttDelay = AsyncDelay(15000 + 3, AsyncDelay::MILLIS); // retry every 15 seconds if not connected
 
 // io.adafruit.com root CA
 const char* adafruitio_root_ca = \
@@ -621,6 +621,7 @@ void setup() {
 
     Serial.println("Display setup");
     display.begin();
+    Serial.println(ESP.getFreeHeap(),DEC);
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(COLOR4);
