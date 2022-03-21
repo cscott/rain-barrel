@@ -1,0 +1,104 @@
+1. Hack LCD tester board:
+   a. bodge in 4.7uF caps for C8/C10/C11 (and then for C2/C3/C4 if
+      needed)
+   b. Check voltage drop across R1, maybe drop to 100 ohm
+   c. Hack interface to LCD Panel board: 7x2
+      pin 1 - 3.3V
+          3 - RST
+          4 - RST (see point 2 below)
+          5 - SCL
+          7 - SI
+          9 - XCS
+          11 - 5V
+          13 - GND
+2. /RST routing -- need an independent source of RST toggle for LCD
+   Panel. Some options:
+   a. Bodge LCD Panel board to bridge TP9 (pin 4 on interboard header)
+      with DS_RST (a little tricky, might have to solder to FPC header;
+      this is easier if we break the /RST trace on the rear panel
+      board so we can just bodge between pin 3 and 4 on the interboard
+      header)
+   b. Bodge Rear Panel board to bridge pin 3 on interboard header to
+      <unknown source of additional output signal>
+      (as before, maybe easiest just to break existing pin 3 trace,
+      short pin 3 and 4, then use the existing pad for pin 4)
+   c. Bodge LCD panel board to bridge DS_RST with <future GPIO>,
+      maybe one from standalone current regulator board
+      (this is easier if we break the trace on the main board so
+      we can solder to pin 3 on interboard header, instead of finding
+      the signal on the FPC header)
+   d. If we don't need DS_CS, repurpose that.  Again, probably easier
+      if we break the /RST trace on the rear panel, and then bridge
+      pins 3 and 9 of the interboard header on either the rear panel
+      board or the lcd panel board.
+3. Do we need LCD_CS -- experiment w/ the LCD tester board and
+   see if we can leave DS_CS grounded all the time.
+4. LCD panel board: the 1uF caps on the LCD interface need to be
+   35V caps, the boost voltage is easily ~25V (although we're trying
+   to manage that)
+5. Controlling backlight: design standalone ADP1650 board that plugs
+   in via STEMMA QT (ie, 3.3v power) and connects to LCD backlight tabs
+
+6. Rewire J17 to F1
+7. Rewire pump output to F5 (verify that we can make this independent
+   of SPI); use F2 for RST sigal
+
+
+FIXES ALREADY ON THE BOARD:
+1. Cut trace to U2 5V supply and rewire to 3.3V supply (top of R3)
+   (not necessary on outdoor unit)
+2. Cut LCD_CS jumper and rewire to F3 on feather header
+   (this is hardware SPI CS pin)
+3. Cut trace to F3 from pressure switch input J17 (in two places,
+   front & back) and rewire to F1 *RIGHT NOW IS REWIRED TO F0 INSTEAD*
+   (not necessary to cut trace on outdoor unit, makes LCD_CS patch easier)
+-- below are not yet done --
+4. Cut trace to LCD_RST on J6 (pin 3) and wire to F0 (on header labeled LCD_CS)
+5. Cut trace to "WATER" header (F1) and wire to F5 (can use "MISO" pad)
+   (not necessary on outdoor unit)
+4. Relabel jumper blocks
+    F0 => LCD_RST (out) [was: LCD_CS]
+    F5 => Water sensor (in) [unchanged]
+    F2 => Pump (out) [unchanged]
+    F3 => LCD_CS (out) [was: PRESSURE]
+  bottom header labelled "Pressure switch"
+    F1 => Pressure Switch (in)
+
+   F0 / GPIO 2 / BUTTON C / blue LED, at boot must be high
+   F1 / GPIO 16 / BUTTON B
+   F2 / GPIO 0 / BUTTON A / red LED, at boot must be high
+      (Power tail out)
+   F3 / GPIO 15 / hardware CS / pull down, at boot must be low.
+   F4 / GPIO 13 / MOSI
+   F5 / GPIO 12 / MISO (can be reclaimed as GPIO by programming function 4)
+   F6 / GPIO 14 / SCK
+
+-----
+Voltages:
+ 1uF everywhere:
+   LCD on (diagonal), 6x:            16mV  Vlcd=17.22
+   LCD off                            6mV  Vlcd=18.09
+   LCD on (checkerbox)               67mV  Vlcd=12.60
+ 2.2uF everywhere, 8x:
+   LCD on (diagonal): V0=15.17, V_r1= 4mV, Vlcd=21.20
+   LCD off:           V0=15.15         mV  Vlcd=22.60
+   LCD on (checkerboard) 12.95    r1=  mV  Vlcd=13.08
+ 2.2uF everywhere, 7x:
+   LCD on (diagonal): V0=13.18, V_r1=16mV, Vlcd=19.32
+   LCD off:           V0=15.12        6mV  Vlcd=20.44
+   LCD on (checkerboard) 13.02    r1=76mV  Vlcd=13.01
+ 10uF doublers, 7x:
+   LCD on (diagonal): V0=15.13       16mV  Vlcd=19.32    .1mA equiv R=208k
+   LCD off:              15.15        6mV  Vlcd=20.44
+   LCD on (checkerboard):12.9        76mV  Vlcd=13.02 => .3mA equiv R=37k
+ 10uF doublers, 6x:
+   LCD on (diagonal): V0=15.16  V_r1=16mV  Vlcd=17.15
+   LCD off:           V0=15.18        6mV       18.05
+   LCD on (checkerboard):12.40       72mV       12.53
+ 10uF doublers, 5x:
+   LCD on: V0=11.89  V_r1=65mV
+   LCD off: V0=15.14
+
+(Note that ST7565 datasheet also recommends increasing size of V1/V4
+caps, but notes that external voltage may be required "for large
+LCDs")
