@@ -9,6 +9,8 @@
 #include <ArduinoOTA.h>
 #include <Adafruit_GFX.h>
 
+// If you use HAS_OLED, you need to adjust the library dependencies in
+// platformio.ini to (re)include 'Adafruit SH110X'
 //#define HAS_OLED
 #define HAS_ST7529
 
