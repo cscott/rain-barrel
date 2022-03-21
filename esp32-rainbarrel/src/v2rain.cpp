@@ -6,6 +6,7 @@
 #define MOTOR_DRIVER_CONNECTED
 #define FLOWMETER_CONNECTED
 //#define ADC_CONNECTED
+#define USE_MQTT
 #undef DEV_MODE // shorter delays for easier development
 
 #include "Arduino.h"
@@ -94,6 +95,17 @@ struct ButtonPress {
   bool operator==(const ButtonPress& rhs) const {
     return a == rhs.a && b == rhs.b && c == rhs.c && d == rhs.d && prox == rhs.prox;
   }
+  boolean pressed() {
+      return a || b || c || d;
+  }
+  void dump() {
+      Serial.print(a ? "A" : " ");
+      Serial.print(b ? "B" : " ");
+      Serial.print(c ? "C" : " ");
+      Serial.print(d ? "D" : " ");
+      Serial.print(prox ? "X" : " ");
+      Serial.println();
+  }
 };
 ButtonPress lastButtonPress;
 
@@ -102,7 +114,7 @@ AsyncDelay debounceDelay = AsyncDelay(250 + 1, AsyncDelay::MILLIS); // switch de
 AsyncDelay capReadInterval = AsyncDelay(50 + 3, AsyncDelay::MILLIS); // read @ 20Hz
 #endif
 
-// WiFiClientSecure for SSL/TLS support
+// WiFiClientSecure for SSL/TLS support (but this is broken!)
 WiFiClientSecure client;
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
@@ -132,6 +144,10 @@ const char* adafruitio_root_ca = \
     "YSEY1QSteDwsOoBrp+uvFRTp2InBuThs4pFsiv9kuXclVzDAGySj4dzp30d8tbQk\n" \
     "CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=\n" \
     "-----END CERTIFICATE-----\n";
+// io.adafruit.com SHA1 fingerprint
+static const char *adafruit_fingerprint PROGMEM = "59 3C 48 0A B1 8B 39 4E 0D 58 50 47 9A 13 55 60 CC A0 1D AF";
+//X509List cert(adafruitio_root_ca);
+
 /****************************** Feeds ***************************************/
 
 // Setup a feed called 'test' for publishing.
@@ -545,21 +561,14 @@ void cap1298_read_buttons(ButtonPress *bp) {
     if (!cap1298_read(CAP1298_REG_SENSOR_STATUS, &val)) {
         return;
     }
-    if (val & 0x01) {
-        bp->a = true;
-    }
-    if (val & 0x02) {
-        bp->b = true;
-    }
-    if (val & 0x04) {
-        bp->c = true;
-    }
-    if (val & 0x08) {
-        bp->d = true;
-    }
-    if (val & 0x10) {
-        bp->prox = true;
-    }
+    bp->a = (val & 0x01) != 0;
+    bp->b = (val & 0x02) != 0;
+    bp->c = (val & 0x04) != 0;
+    bp->d = (val & 0x08) != 0;
+    bp->prox = (val & 0x10) != 0;
+    // Clear interrupt
+    cap1298_read(CAP1298_REG_MAIN_CONTROL, &val);
+    cap1298_write(CAP1298_REG_MAIN_CONTROL, val&0xFE);
 }
 
 void setup() {
@@ -570,9 +579,11 @@ void setup() {
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, HIGH);
 
+#ifdef RAINPUMP_V2
     pinMode(WATER_SENSE, INPUT_PULLUP);
     pinMode(PRESSURE_SW, INPUT_PULLUP);
     pinMode(PUMP_CNTRL, OUTPUT);
+#endif
 
     digitalWrite(LCD_CS, 1);
     pinMode(LCD_CS, OUTPUT);
@@ -650,6 +661,9 @@ void setup() {
 
     // Set Adafruit IO's root CA
     // client.setCACert(adafruitio_root_ca); // XXX
+    client.setFingerprint(adafruit_fingerprint);
+    //client.setTrustAnchors(&cert);
+    mqtt.connect();
 
     ArduinoOTA.setHostname(MDNS_NAME);
     ArduinoOTA.setPassword(OTA_PASSWD);
@@ -695,7 +709,7 @@ void setup() {
         Serial.print(":");
         Serial.print(MDNS.port(i));
         Serial.println(")");
-        if (MDNS.hostname(i) == "rainpump") {
+        if (MDNS.hostname(i) == "rainpump" || MDNS.hostname(i) == "rainpump.local" ) {
             serverBaseUrl.remove(0);
             serverBaseUrl += "http://";
             serverBaseUrl += MDNS.IP(i).toString();
@@ -747,6 +761,7 @@ void sendUpdate(int new_user_state = -1) {
   state.connected_recently = false;
   // test client
   HTTPClient http;
+  WiFiClient client2; // not secure
   String url2 = serverBaseUrl;
   url2 += "?level1=";
   url2 += state.water_level[0];
@@ -756,8 +771,8 @@ void sendUpdate(int new_user_state = -1) {
     url2 += "&state=";
     url2 += new_user_state;
   }
-  //Serial.println(url2);
-  http.begin(client, url2);
+  Serial.println(url2);
+  http.begin(client2, url2);
   int httpCode = http.GET();
   if (httpCode == HTTP_CODE_OK) {
     StaticJsonDocument<192> root;
@@ -773,6 +788,9 @@ void sendUpdate(int new_user_state = -1) {
       connectionWatchdog.restart();
       Serial.printf("Got user_state %d\n", state.user_state);
     }
+  } else {
+      Serial.print("Bad HTTP response: ");
+      Serial.println(httpCode);
   }
   http.end();
   lastPing.restart();
@@ -810,6 +828,7 @@ void updateState() {
       }
 #endif
     }
+#ifdef USE_MQTT
     // periodically send levels to AIO
     if (waterLevelFeedDelay.isExpired() && mqtt.connected()) {
       // publishing raw levels for now, for calibration purpoes
@@ -817,6 +836,7 @@ void updateState() {
       waterLevel2Feed.publish(raw_level[1]/*state.water_level[1]*/);
       waterLevelFeedDelay.restart();
     }
+#endif
   }
   if (lastPing.isExpired() || !state_equal(&state, &last_xmit_state)) {
     // send our levels to the server via a GET request and update our copy of the server state
@@ -1072,24 +1092,36 @@ void loop() {
     delay(5000);
     ESP.restart();
   }
+#ifdef USE_MQTT
   if ((!mqtt.connected()) && mqttDelay.isExpired()) {
     int ret = mqtt.connect();
     if (ret != 0) {
-      Serial.println(mqtt.connectErrorString(ret));
+        Serial.print("MQTT: ");
+        Serial.println(mqtt.connectErrorString(ret));
     }
+    mqtt.disconnect();
     mqttDelay.restart();
   }
+#endif
   // Update user state via buttons
-  ButtonPress button_press;
+  ButtonPress button_press = lastButtonPress;
+  bool buttons_changed = false;
   if (capReadInterval.isExpired()) { // don't clog up the I2C
       capReadInterval.restart();
+#ifndef DISABLE_BUTTONS
       cap1298_read_buttons(&button_press);
-  } else {
-      button_press = lastButtonPress;
-  }
-#ifdef DISABLE_BUTTONS
-  button_press = ButtonPress();
+      buttons_changed = !(button_press == lastButtonPress);
+#if 0 // debugging
+      if (buttons_changed) {
+          Serial.println("Buttons pressed");
+          button_press.dump();
+          lastButtonPress.dump();
+      }
 #endif
+      lastButtonPress = button_press;
+#endif
+  }
+
 #ifdef RAINPUMP_V2
   server.handleClient();
   if (WiFi.isConnected()) {
@@ -1109,7 +1141,9 @@ void loop() {
 #endif
 #ifdef RAINGAUGE_V2
   // read buttons, if pressed immediately sent a ?state= request to the server and expire lastPing()
-  if (button_press.a) {
+  if (!buttons_changed) {
+      updateState();
+  } else if (button_press.a) {
     sendUpdate(STATE_CITY);
     displayMaxRefresh.expire();
   } else if (button_press.b) {
