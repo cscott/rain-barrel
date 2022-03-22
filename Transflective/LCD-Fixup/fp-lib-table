@@ -1,0 +1,5 @@
+(fp_lib_table
+  (lib (name Transflective)(type KiCad)(uri /home/cananian/Projects/Electronics/RainBarrel/Transflective/Rear-Panel/Transflective.pretty)(options "")(descr ""))
+  (lib (name ADP1650)(type KiCad)(uri /home/cananian/Projects/Electronics/RainBarrel/Transflective/ADP1650ACPZR7/footprints.pretty)(options "")(descr ""))
+  (lib (name ADP1650v2)(type KiCad)(uri /home/cananian/Projects/Electronics/RainBarrel/Transflective/ADP1650ACPZR7v2/footprints.pretty)(options "")(descr ""))
+)
