@@ -13,9 +13,14 @@
 #include <Wire.h>
 #include <AsyncDelay.h>
 
-#include <ESP8266WiFi.h>
+#ifdef ESP32
+# include <WiFi.h>
+# include <ESPmDNS.h>
+#else
+# include <ESP8266WiFi.h>
+# include <ESP8266mDNS.h>
+#endif
 #include <WiFiClient.h>
-#include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
 #include <Adafruit_GFX.h>
 
@@ -33,13 +38,27 @@
 #include "cap1298.h"
 // also adp1650.h, but that's not working yet
 // V2 pin assignments
-#define LCD_RST         2 // F0 / GPIO  2 => LCD_RST (out)
-#define PRESSURE_SW    16 // F1 / GPIO 16 => Pressure switch (in)
-#define PUMP_CNTRL      0 // F2 / GPIO  0 => Pump (out)
-#define LCD_CS         15 // F3 / GPIO 15 => LCD_CS (out)
-#define LCD_MOSI       13 // F4 / GPIO 13 => LCD_MOSI (out)
-#define WATER_SENSE    10 // F5 / GPIO 12 => Water sensor (in)
-#define LCD_SCK        14 // F6 / GPIO 14 => LCD_SCK
+#if defined(ARDUINO_FEATHER_ESP32)
+# define LED_GPIO       13
+# define LCD_RST        14      // F0
+# define PRESSURE_SW    32      // F1 (pressure switch input)
+# define PUMP_CNTRL     15      // F2 (power tail out)
+# define LCD_CS         33      // F3
+# define WATER_SENSE    12      // F5 (water present, has a pull-down, boot!)
+# define LCD_SI         18 // MOSI
+# define LCD_SCL         5 // SCK
+#elif defined(ARDUINO_ESP8266_ADAFRUIT_HUZZAH) // FEATHER_8266
+# define LED_GPIO       -1 // steps on GPIO 0, suppress
+# define LCD_RST         2 // F0 / GPIO  2 => LCD_RST (out)
+# define PRESSURE_SW    16 // F1 / GPIO 16 => Pressure switch (in)
+# define PUMP_CNTRL      0 // F2 / GPIO  0 => Pump (out)
+# define LCD_CS         15 // F3 / GPIO 15 => LCD_CS (out)
+# define LCD_SI         13 // F4 / GPIO 13 => LCD_MOSI (out)
+# define WATER_SENSE    10 // F5 / GPIO 12 => Water sensor (in)
+# define LCD_SCL        14 // F6 / GPIO 14 => LCD_SCK
+#else
+# error Unknown pin assignments
+#endif
 
 #ifdef RAIN_SERVER_v2
 # include <Adafruit_MotorShield.h>
@@ -48,7 +67,11 @@
 # include "smrty_decode.h"
 #endif
 #ifdef RAINGAUGE_V2
-# include <ESP8266HTTPClient.h>
+# ifdef ESP32
+#  include <HTTPClient.h>
+# else
+#  include <ESP8266HTTPClient.h>
+# endif
 #ifdef ADC_CONNECTED
 # include <Adafruit_ADS1X15.h>
 #endif
@@ -80,7 +103,7 @@
 // will tend to space themselves out over time and not all pile up at the same
 // millisecond boundary.
 
-ST7529_LCD display = ST7529_LCD();
+ST7529_LCD display = ST7529_LCD(240, 128, LCD_RST, LCD_CS, LCD_SCL, LCD_SI);
 
 AsyncDelay displayMaxRefresh = AsyncDelay(4 * 60 * 60 * 1000 + 11, AsyncDelay::MILLIS); // 6x a day need it or not
 AsyncDelay displayMinRefresh = AsyncDelay(13, AsyncDelay::MILLIS); // no more than once/10ms seconds
@@ -120,6 +143,7 @@ WiFiClientSecure client;
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
 AsyncDelay mqttDelay = AsyncDelay(15000 + 3, AsyncDelay::MILLIS); // retry every 15 seconds if not connected
 
+#ifdef ESP32
 // io.adafruit.com root CA
 const char* adafruitio_root_ca = \
     "-----BEGIN CERTIFICATE-----\n" \
@@ -144,9 +168,11 @@ const char* adafruitio_root_ca = \
     "YSEY1QSteDwsOoBrp+uvFRTp2InBuThs4pFsiv9kuXclVzDAGySj4dzp30d8tbQk\n" \
     "CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=\n" \
     "-----END CERTIFICATE-----\n";
+#else
 // io.adafruit.com SHA1 fingerprint
 static const char *adafruit_fingerprint PROGMEM = "59 3C 48 0A B1 8B 39 4E 0D 58 50 47 9A 13 55 60 CC A0 1D AF";
 //X509List cert(adafruitio_root_ca);
+#endif
 
 /****************************** Feeds ***************************************/
 
@@ -638,6 +664,13 @@ void setup() {
     Serial.println("Booting");
 
     // Wait for connection
+#ifdef ESP32
+    while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+        Serial.println("Connection Failed! Rebooting...");
+        delay(5000);
+        ESP.restart();
+    }
+#else
     int timeout = 0;
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
@@ -648,6 +681,7 @@ void setup() {
             ESP.restart();
         }
     }
+#endif
     display.print("IP: ");
     display.println(WiFi.localIP());
     display.display();
@@ -661,9 +695,12 @@ void setup() {
     }
 
     // Set Adafruit IO's root CA
-    // client.setCACert(adafruitio_root_ca); // XXX
+#ifdef ESP32
+    client.setCACert(adafruitio_root_ca);
+#else
     client.setFingerprint(adafruit_fingerprint);
     //client.setTrustAnchors(&cert);
+#endif
     mqtt.connect();
 
     ArduinoOTA.setHostname(MDNS_NAME);

@@ -11,7 +11,12 @@
 #define COMMAND1 1
 #define DATA     2
 
-#define BPP 2 /* could be 1/2/4/8 */
+#ifdef ESP32
+# define BPP 4
+#else
+// try to save memory
+# define BPP 2 /* could be 1/2/4/8 */
+#endif
 
 ST7529_LCD::ST7529_LCD(uint16_t w, uint16_t h, int8_t rst_pin, int8_t cs_pin, int8_t scl_pin, int8_t si_pin)
     : Adafruit_GFX(w, h), rstPin(rst_pin), csPin(cs_pin), sclPin(scl_pin), siPin(si_pin) {
