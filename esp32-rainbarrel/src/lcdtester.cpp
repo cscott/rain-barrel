@@ -1,33 +1,54 @@
-#ifdef LCDTESTER
+#if defined(LCDTESTER) || defined(LCDTESTER32)
 #include "Arduino.h"
 #include <AsyncDelay.h>
+#ifdef LCDTESTER
 #include <ESP8266WiFi.h>
-#include <WiFiClient.h>
 #include <ESP8266mDNS.h>
+#endif
+#ifdef LCDTESTER32
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#endif
+#include <WiFiClient.h>
 #include <ArduinoOTA.h>
 
-#define HARDWARE_SPI
+//#define HARDWARE_SPI
 
 #ifdef HARDWARE_SPI
 # include <driver/spi.h> // At the moment this is incompatible with standard SPI
 #else
-# define LCD_SI 13 /* MOSI */
-# define LCD_SCL 14 /* SCK */
+# ifdef LCDTESTER
+#  define LCD_SI 13 /* MOSI */
+#  define LCD_SCL 14 /* SCK */
+# endif
+# ifdef LCDTESTER32
+#  define LCD_SI 18 /* MOSI */
+#  define LCD_SCL 5 /* SCK */
+# endif
 #endif
 
 #include "config.h"
 #define MDNS_NAME "flowtester" // keep same name as flowtester
 
-#define LED_GPIO 0
+#ifdef LCDTESTER
+# define LED_GPIO        0
+# define LCD_RST         2 // F0
+# define PRESSURE_SW_IN 16 // F1 (pressure switch input)
+# define PUMP_CNTRL      0      // F2 (power tail out)
+# define LCD_CS         15 // F3
+# define WATER_SENSE    12      // F5 (water present) (also MISO)
+#endif
+#ifdef LCDTESTER32
+# define LED_GPIO       13
+# define LCD_RST        14 // F0
+# define PRESSURE_SW_IN 32 // F1 (pressure switch input)
+# define PUMP_CNTRL     15      // F2 (power tail out)
+# define LCD_CS         33 // F3
+# define WATER_SENSE    12      // F5 (water present, has a pull-down, boot!)
+#endif
+
 #define LED_OFF 1 // active low
 #define LED_ON  0 // active low
-
-#define LCD_CS 15 // F3
-#define LCD_RST 2 // F0
-#define WATER_SENSE 12      // F5 (water present) (also MISO)
-#define PUMP_CNTRL 0      // F2 (power tail out)
-#define PRESSURE_SW_IN 16 // F1 (pressure switch input)
-
 #define LCD_COLS 240
 #define LCD_ROWS 128
 
@@ -151,7 +172,9 @@ void ST7529_Clear() {
         framebuffer[i] = 0;
     }
     for (int y = 0; y < LCD_ROWS; y++) {
+#ifndef ESP32
         ESP.wdtFeed();
+#endif
         for (int x = 0; x < LCD_COLS; x+=3) {
             lcdWrite( DATA, 0 );
             lcdWrite( DATA, 0 );
@@ -195,7 +218,7 @@ bool initializeLCD() {
     // ST7529 driver chip
     // https://www.crystalfontz.com/controllers/Sitronix/ST7529/
     // IF1=L IF2=L IF3=H (9-bit serial, 3 line)
-    delay(1); // wait for power to stabilize
+    delay(100); // wait for power to stabilize
     ST7529_Init();
     // Clear screen
     ST7529_Clear();
@@ -210,6 +233,9 @@ void setup() {
   // Wifi Setup
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  digitalWrite(LED_BUILTIN, LED_ON);
+  pinMode(LED_BUILTIN, OUTPUT);
 
   digitalWrite(LCD_CS, 1);
   pinMode(LCD_CS, OUTPUT);
@@ -233,11 +259,22 @@ void setup() {
   Serial.print("Connecting to SSID\n" WIFI_SSID ": ");
 
   // Wait for connection
+#ifdef LCDTESTER
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("connected");
+#endif
+#ifdef LCDTESTER32
+  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+    Serial.println("Connection Failed! Rebooting...");
+    delay(5000);
+    ESP.restart();
+  }
+#endif
+  Serial.println("connected.");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
 
   mdns_success = false;
   if (MDNS.begin(MDNS_NAME)) {
@@ -282,7 +319,9 @@ void setup() {
 
 void loop() {
     ArduinoOTA.handle();
+#ifdef LCDTESTER
     MDNS.update();
+#endif
     if (!updateDelay.isExpired()) {
         return;
     }
@@ -292,4 +331,4 @@ void loop() {
     digitalWrite(LED_BUILTIN, blinkWasOn);
 }
 
-#endif /* LCDTESTER */
+#endif /* LCDTESTER || LCDTESTER32 */
