@@ -194,6 +194,9 @@ void setup() {
     delay(500);
     Serial.print(".");
   }
+  Serial.println();
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
 #if defined(HAS_OLED) || defined(HAS_ST7529)
   display.clearDisplay();
   display.setCursor(0,0);
@@ -243,6 +246,7 @@ void setup() {
   });
 
   ArduinoOTA.begin();
+  Serial.println("Startup complete.");
 }
 
 void updateDisplay(bool blink) {
@@ -347,6 +351,7 @@ void updateDisplay(bool blink) {
   readRegister(CAP1298_I2C_ADDR, CAP1298_REG_MAIN_CONTROL, &val);
   writeRegister(CAP1298_I2C_ADDR, CAP1298_REG_MAIN_CONTROL, val&0xFE);
 
+#if 0
   // Try to connect to ADP1650
   display.print("ADP1650: ");
   if (readRegister(ADP1650_I2C_ADDR, 0x00, &val)) {
@@ -355,6 +360,7 @@ void updateDisplay(bool blink) {
       display.print("XX");
   }
   display.println();
+#endif
 
 #if 0
   for (uint8_t address = 1; address < 127; address++) {
