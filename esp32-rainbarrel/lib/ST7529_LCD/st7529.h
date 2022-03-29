@@ -8,7 +8,7 @@
 
 class ST7529_LCD : public Adafruit_GFX {
 public:
-    ST7529_LCD(uint16_t w = 240, uint16_t h = 128, int8_t rst_pin = 2);
+    ST7529_LCD(uint16_t w = 240, uint16_t h = 128, int8_t rst_pin = 2, int8_t cs_pin = -1, int8_t scl_pin = -1, int8_t si_pin = -1);
     ~ST7529_LCD(void);
 
     bool begin(void); // must call this to init
@@ -28,8 +28,9 @@ public:
       window_x2,     ///< Dirty tracking window maximum x
       window_y2;     ///< Dirty tracking window maximum y
 public:
-  int rstPin; // The arduino pin connected to reset (-1 if unused)
-  int ext_mode = -1; // 0 if EXT = 0, 1 if EXT = 1, -1 if unknown (initially)
+  int8_t rstPin; // The arduino pin connected to reset (-1 if unused)
+  int8_t csPin, sclPin, siPin; // arduino pins for CS/SCL/SI (software spi only)
+  int8_t ext_mode = -1; // 0 if EXT = 0, 1 if EXT = 1, -1 if unknown (initially)
 };
 
 #endif /* !ST7529_H */

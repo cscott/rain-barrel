@@ -1,6 +1,8 @@
 #include "st7529.h"
 #include <Adafruit_GFX.h>
+#ifndef SOFTWARE_SPI
 #include <driver/spi.h> // At the moment this is incompatible with standard SPI
+#endif
 
 #define st7529_swap(a, b)                                                    \
   (((a) ^= (b)), ((b) ^= (a)), ((a) ^= (b))) ///< No-temp-var swap operation
@@ -11,8 +13,8 @@
 
 #define BPP 2 /* could be 1/2/4/8 */
 
-ST7529_LCD::ST7529_LCD(uint16_t w, uint16_t h, int8_t rst_pin)
-    : Adafruit_GFX(w, h), rstPin(rst_pin) {
+ST7529_LCD::ST7529_LCD(uint16_t w, uint16_t h, int8_t rst_pin, int8_t cs_pin, int8_t scl_pin, int8_t si_pin)
+    : Adafruit_GFX(w, h), rstPin(rst_pin), csPin(cs_pin), sclPin(scl_pin), siPin(si_pin) {
 }
 
 ST7529_LCD::~ST7529_LCD(void) {
@@ -45,8 +47,17 @@ bool ST7529_LCD::_init(void) {
         digitalWrite(rstPin, 0);
         pinMode(rstPin, OUTPUT);
     }
+#ifdef SOFTWARE_SPI
+    digitalWrite(siPin, 0);
+    pinMode(siPin, OUTPUT);
+    digitalWrite(sclPin, 0);
+    pinMode(sclPin, OUTPUT);
+    digitalWrite(csPin, 1);
+    pinMode(csPin, OUTPUT);
+#else
     spi_init(HSPI); // 4 MHz
     spi_mode(HSPI, 1, 1);
+#endif
     if (rstPin >= 0) {
         delay(1);//delayMicroseconds(1);
         digitalWrite(rstPin, 1);
@@ -274,7 +285,9 @@ void ST7529_LCD::display(void) {
     lcdWrite( COMMAND0, 0x05C );
 
     for (int y = window_y1; y <= window_y2; y++) {
+#ifndef ESP32
         ESP.wdtFeed();
+#endif
         int idx = window_x1*3 + y*WIDTH;
         uint8_t *b = buffer + idx/(8/BPP);
 #if BPP < 8
@@ -315,9 +328,28 @@ void ST7529_LCD::lcdWrite( uint8_t type, uint8_t data) {
         ext_mode = 1;
         lcdWrite( COMMAND1, 0x0031 ); // EXT = 1
     }
+#ifdef SOFTWARE_SPI
+    digitalWrite(sclPin, 1);
+    digitalWrite(csPin, 0);
+    digitalWrite(siPin, (type==DATA) ? 1 : 0);
+    digitalWrite(sclPin, 0);
+    delayMicroseconds(1);
+    digitalWrite(sclPin, 1); // Latch at rising edge
+    delayMicroseconds(1);
+    for (int i=0; i<8; i++) {
+        digitalWrite(sclPin, 0);
+        digitalWrite(siPin, (data & 0x80) ? 1 : 0); // MSB first
+        data = data << 1;
+        delayMicroseconds(1);
+        digitalWrite(sclPin, 1); // Latch at rising edge
+        delayMicroseconds(1);
+    }
+    digitalWrite(csPin, 1);
+#else /* hardware spi */
     uint32_t data32 = data;
     if (type == DATA ) {
         data32 |= 0x100;
     }
     spi_txd(HSPI, 9, data32);
+#endif
 }

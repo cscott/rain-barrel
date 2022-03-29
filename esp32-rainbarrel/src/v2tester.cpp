@@ -1,11 +1,17 @@
-#ifdef V2TESTER
+#if defined(V2TESTER) || defined(V2TESTER32)
 #include "Arduino.h"
 #include <Wire.h>
 #include <AsyncDelay.h>
 
-#include <ESP8266WiFi.h>
+#ifdef V2TESTER
+# include <ESP8266WiFi.h>
+# include <ESP8266mDNS.h>
+#endif
+#ifdef V2TESTER32
+# include <WiFi.h>
+# include <ESPmDNS.h>
+#endif
 #include <WiFiClient.h>
-#include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
 #include <Adafruit_GFX.h>
 
@@ -43,22 +49,36 @@ Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
 #define BUTTON_C  2
 #endif
 
-#ifdef HAS_ST7529
-ST7529_LCD display = ST7529_LCD();
-#define WHITE ST7529_BLACK
-#define BLACK ST7529_WHITE
+// Other config
+#ifdef V2TESTER
+# define LED_GPIO        0
+# define LCD_RST         2      // F0
+# define PRESSURE_SW_IN 16      // F1 (pressure switch input)
+# define PUMP_CNTRL      0      // F2 (power tail out)
+# define LCD_CS         15      // F3
+# define WATER_SENSE    12      // F5 (water present) (also MISO)
+# define LCD_SI         13 // MOSI
+# define LCD_SCL        14 // SCK
+#endif
+#ifdef V2TESTER32
+# define LED_GPIO       13
+# define LCD_RST        14      // F0
+# define PRESSURE_SW_IN 32      // F1 (pressure switch input)
+# define PUMP_CNTRL     15      // F2 (power tail out)
+# define LCD_CS         33      // F3
+# define WATER_SENSE    12      // F5 (water present, has a pull-down, boot!)
+# define LCD_SI         18 // MOSI
+# define LCD_SCL         5 // SCK
 #endif
 
-// Other config
-#define LED_GPIO 0
 #define LED_OFF 1 // active low
 #define LED_ON  0 // active low
 
-#define LCD_CS 15 // F3
-#define LCD_RST 2 // F0
-#define WATER_SENSE 12      // F5 (water present) (also MISO)
-#define PUMP_CNTRL 0      // F2 (power tail out)
-#define PRESSURE_SW_IN 16 // F1 (pressure switch input)
+#ifdef HAS_ST7529
+ST7529_LCD display = ST7529_LCD(240, 128, LCD_RST, LCD_CS, LCD_SCL, LCD_SI);
+#define WHITE ST7529_BLACK
+#define BLACK ST7529_WHITE
+#endif
 
 AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
 bool blinkWasOn = false;
@@ -115,6 +135,9 @@ void setup() {
   // Wifi Setup
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  digitalWrite(LED_BUILTIN, LED_ON);
+  pinMode(LED_BUILTIN, OUTPUT);
 
   digitalWrite(LCD_CS, 1);
   pinMode(LCD_CS, OUTPUT);
@@ -190,11 +213,21 @@ void setup() {
 #endif
 
   // Wait for connection
+#ifdef V2TESTER
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
+#endif
+#ifdef V2TESTER32
+  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+    Serial.println("Connection Failed! Rebooting...");
+    delay(5000);
+    ESP.restart();
+  }
+#endif
   Serial.println();
+
   Serial.print("IP: ");
   Serial.println(WiFi.localIP());
 #if defined(HAS_OLED) || defined(HAS_ST7529)
@@ -380,7 +413,9 @@ void updateDisplay(bool blink) {
 
 void loop() {
     ArduinoOTA.handle();
+#ifdef V2TESTER
     MDNS.update();
+#endif
     if (!updateDelay.isExpired()) {
         return;
     }
@@ -390,4 +425,4 @@ void loop() {
     blinkWasOn = !blinkWasOn;
 }
 
-#endif /* V2TESTER */
+#endif /* V2TESTER || V2TESTER32 */
