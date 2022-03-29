@@ -6,6 +6,10 @@ v1 of "Rear-Panel" PCB:
   (2022-03-19 why? apparently because F3 is hardware CS for SPI.
   DS_CS should be F3, Pressure switch should be F1
 * Probably should have a jumper for LCD_RST
+* Probably should add another schottkey diode heading *into* the 5V
+  net, with a pad on the input to connect to external power
+* Probably should label "A2" on the board as "5V IN"
+
 
 v1 of "LCD Panel" PCB:
 * The LED driver chip footprint has a center ground pad which
