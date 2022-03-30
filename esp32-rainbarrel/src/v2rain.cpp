@@ -5,12 +5,13 @@
 
 #define MOTOR_DRIVER_CONNECTED
 #define FLOWMETER_CONNECTED
-//#define ADC_CONNECTED
+#define ADC_CONNECTED
 #define USE_MQTT
 #undef DEV_MODE // shorter delays for easier development
 
 #include "Arduino.h"
 #include <Wire.h>
+#include <SPI.h> // this is done to help pio discover this dependency
 #include <AsyncDelay.h>
 
 #ifdef ESP32
