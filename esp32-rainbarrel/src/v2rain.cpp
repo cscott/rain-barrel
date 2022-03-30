@@ -29,8 +29,8 @@
 #include <ArduinoJson.h>
 #include <AsyncDelay.h>
 #include "config.h"
-#include "bluehigh-12px.h"
-#include "bluebold-14px.h"
+#include "bluehigh-10px.h"
+#include "bluebold-11px.h"
 #include "icons.h"
 
 // V2 hardware features
@@ -103,7 +103,9 @@
 // will tend to space themselves out over time and not all pile up at the same
 // millisecond boundary.
 
-ST7529_LCD display = ST7529_LCD(240, 128, LCD_RST, LCD_CS, LCD_SCL, LCD_SI);
+#define LCD_WIDTH 240
+#define LCD_HEIGHT 128
+ST7529_LCD display = ST7529_LCD(LCD_WIDTH, LCD_HEIGHT, LCD_RST, LCD_CS, LCD_SCL, LCD_SI);
 
 AsyncDelay displayMaxRefresh = AsyncDelay(4 * 60 * 60 * 1000 + 11, AsyncDelay::MILLIS); // 6x a day need it or not
 AsyncDelay displayMinRefresh = AsyncDelay(13, AsyncDelay::MILLIS); // no more than once/10ms seconds
@@ -301,11 +303,11 @@ SystemState last_xmit_state = state;
 void updateState();
 
 void normalface() {
-  display.setFont(&bluehigh12pt7b);
+  display.setFont(&bluehigh10pt7b);
 }
 
 void boldface() {
-  display.setFont(&bluebold14pt7b);
+  display.setFont(&bluebold11pt7b);
 }
 
 #ifdef RAINPUMP_V2
@@ -990,8 +992,12 @@ void rightjustify(const char *str) {
   display.print(str);
 }
 
+void leftjustify(const char *str) {
+    display.print(str);
+}
+
 void updateDisplay() {
-  // eInk display update
+  // transflective display update
   if (state_equal(&state, &last_displayed_state) && !displayMaxRefresh.isExpired()) {
     return; // don't update if nothing has changed
   }
@@ -1019,13 +1025,13 @@ void updateDisplay() {
 
 #define BAR_TOP 26
 #define BAR_HEIGHT (53-26)
-#define BAR_WIDTH (256-38)
+#define BAR_WIDTH (LCD_WIDTH-38)
 #define BAR_SPACE (63-26)
   for (int i = 0; i < 2; i++) {
     int x = display.width() / 2 - (BAR_WIDTH / 2);
     int y = BAR_TOP + i * BAR_SPACE;
     int amount = state.water_level[i] * (BAR_WIDTH - 2) / 1000;
-    display.setCursor(x - 16, y + (BAR_HEIGHT / 2) + 6);
+    display.setCursor(x - 4, y + (BAR_HEIGHT / 2) + 6);
     display.setTextColor(COLOR3);
     rightjustify(i == 0 ? "1:" : "2:");
     display.fillRect(x, y, BAR_WIDTH, BAR_HEIGHT, COLOR4);
@@ -1095,27 +1101,29 @@ void updateDisplay() {
             RIGHT_ARROW_NUM);
   }
   // pipe sensor status
+#define PIPE_ICON_X (LCD_WIDTH - 47) // was 54
   if (client_connected_recently) {
     if (state.pipe_water_present) {
-      BITMAP4(242 - DROP_ON_WIDTH / 2,
+      BITMAP4(PIPE_ICON_X - DROP_ON_WIDTH / 2,
               display.height() - BUTTON_HEIGHT / 2 - DROP_ON_HEIGHT / 2,
               DROP_ON_WIDTH, DROP_ON_HEIGHT,
               DROP_ON_NUM);
     } else {
-      BITMAP4(242 - DROP_OFF_WIDTH / 2,
+      BITMAP4(PIPE_ICON_X - DROP_OFF_WIDTH / 2,
               display.height() - BUTTON_HEIGHT / 2 - DROP_OFF_HEIGHT / 2,
               DROP_OFF_WIDTH, DROP_OFF_HEIGHT,
               DROP_OFF_NUM);
     }
   }
   // connection status
+#define CONN_ICON_X (LCD_WIDTH - 18) // was 22
   if (state.connected_recently) {
-    BITMAP4(274 - CONN_ON_WIDTH / 2,
+    BITMAP4(CONN_ICON_X - CONN_ON_WIDTH / 2,
             display.height() - BUTTON_HEIGHT / 2 - CONN_ON_HEIGHT / 2,
             CONN_ON_WIDTH, CONN_ON_HEIGHT,
             CONN_ON_NUM);
   } else {
-    BITMAP4(274 - CONN_OFF_WIDTH / 2,
+    BITMAP4(CONN_ICON_X - CONN_OFF_WIDTH / 2,
             display.height() - BUTTON_HEIGHT / 2 - CONN_OFF_HEIGHT / 2,
             CONN_OFF_WIDTH, CONN_OFF_HEIGHT,
             CONN_OFF_NUM);
