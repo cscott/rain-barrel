@@ -19,6 +19,7 @@
 // platformio.ini to (re)include 'Adafruit SH110X'
 //#define HAS_OLED
 #define HAS_ST7529
+#define HAS_ADP1650
 
 // includes for OLED display
 #ifdef HAS_OLED
@@ -80,9 +81,11 @@ ST7529_LCD display = ST7529_LCD(240, 128, LCD_RST, LCD_CS, LCD_SCL, LCD_SI);
 #define BLACK ST7529_WHITE
 #endif
 
-AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
-bool blinkWasOn = false;
+AsyncDelay updateDelay = AsyncDelay(100, AsyncDelay::MILLIS);
 bool mdns_success;
+bool adp1650_found = false;
+AsyncDelay blinkDelay = AsyncDelay(1000, AsyncDelay::MILLIS);
+bool blinkWasOn = false;
 
 #if defined(HAS_OLED) || defined(HAS_ST7529)
 void normalText() {
@@ -120,7 +123,7 @@ bool readRegister(uint8_t i2c_addr, uint8_t regno, uint8_t *val) {
   if (status != 0) {
       return false;
   }
-  uint8_t nBytes = Wire.requestFrom(i2c_addr, 1);
+  uint8_t nBytes = Wire.requestFrom(i2c_addr, (uint8_t)1);
   if (nBytes == 0) {
       return false;
   }
@@ -144,6 +147,11 @@ void setup() {
   digitalWrite(LCD_RST, 0);
   pinMode(LCD_RST, OUTPUT);
 
+  adp1650_found = false;
+  uint8_t val;
+  if (readRegister(ADP1650_I2C_ADDR, 0x00, &val) && val == 0x22) {
+      adp1650_found = true;
+  }
 #ifdef HAS_OLED
   // OLED setup
   display.begin(0x3C, true); // Address 0x3C default
@@ -152,7 +160,10 @@ void setup() {
   pinMode(BUTTON_C, INPUT_PULLUP);
 #endif
 #ifdef HAS_ST7529
-  bool st = display.begin();
+  // assume that if adp1650 was found, then external booster is being used
+  // XXX be safe, since we know we've wired up an external power supply,
+  // don't take the chance of having them fight.
+  bool st = display.begin(false /*!adp1650_found*/);
   Serial.print("Display begin: ");
   Serial.println(st);
 #endif
@@ -323,7 +334,6 @@ void updateDisplay(bool blink) {
 
   // Test cap sense
   display.print("CAP1298: ");
-  uint8_t prodId, mfrId, rev;
 #if 0
   if (readRegister(CAP1298_I2C_ADDR, CAP1298_REG_PRODUCT_ID, &val)) {
       printHex(val); display.print(" ");
@@ -364,9 +374,11 @@ void updateDisplay(bool blink) {
       display.print("XX ");
   }
 #endif
+  bool bright = false;
   display.print("SEN:");
   if (readRegister(CAP1298_I2C_ADDR, CAP1298_REG_SENSOR_STATUS, &val)) {
       printHex(val);
+      bright = (val&0x10);
   } else {
       display.print("XX");
   }
@@ -384,18 +396,28 @@ void updateDisplay(bool blink) {
   readRegister(CAP1298_I2C_ADDR, CAP1298_REG_MAIN_CONTROL, &val);
   writeRegister(CAP1298_I2C_ADDR, CAP1298_REG_MAIN_CONTROL, val&0xFE);
 
-#if 0
+#ifdef HAS_ADP1650
   // Try to connect to ADP1650
+  adp1650_found = false;
   display.print("ADP1650: ");
   if (readRegister(ADP1650_I2C_ADDR, 0x00, &val)) {
       printHex(val);
+      if (val == 0x22) {
+          adp1650_found = true;
+      }
   } else {
       display.print("XX");
   }
   display.println();
+  if (adp1650_found) {
+      // 0 = 25mA.  Nominal=120mA; 4 = 125mA.  So "3" is probably the right value.
+      // but "max current" on the datasheet is 180mA
+      writeRegister(ADP1650_I2C_ADDR, 0x03 /* Current Set Register */, bright ? 4 : 0 /*25mA*/);
+      writeRegister(ADP1650_I2C_ADDR, 0x04 /* Output Mode Register */, 0x10 | ((blink||bright) ? 0xA : 0x0));
+  }
 #endif
 
-#if 0
+#if 1
   for (uint8_t address = 1; address < 127; address++) {
       Wire.beginTransmission(address);
       int error = Wire.endTransmission();
@@ -404,6 +426,12 @@ void updateDisplay(bool blink) {
       } else if (error == 4) {
           printHex(address); display.print("! ");
       }
+  }
+#endif
+#if 0
+  // test VLCD power supply by displaying a checkerboard pattern
+  for (int i=0; i<display.width()+display.height(); i+=2) {
+      display.drawLine(0,i,i,0,WHITE);
   }
 #endif
 
@@ -416,13 +444,17 @@ void loop() {
 #ifdef V2TESTER
     MDNS.update();
 #endif
+    if (blinkDelay.isExpired()) {
+        blinkWasOn = !blinkWasOn;
+        blinkDelay.restart();
+    }
     if (!updateDelay.isExpired()) {
         return;
     }
     updateDelay.restart();
 
     updateDisplay(blinkWasOn);
-    blinkWasOn = !blinkWasOn;
+    digitalWrite(LED_BUILTIN, blinkWasOn ? LED_ON : LED_OFF);
 }
 
 #endif /* V2TESTER || V2TESTER32 */

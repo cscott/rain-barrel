@@ -11,7 +11,7 @@ public:
     ST7529_LCD(uint16_t w = 240, uint16_t h = 128, int8_t rst_pin = 2, int8_t cs_pin = -1, int8_t scl_pin = -1, int8_t si_pin = -1);
     ~ST7529_LCD(void);
 
-    bool begin(void); // must call this to init
+    bool begin(bool boost=true); // must call this to init
     void display(void);
     void clearDisplay(void);
     void invertDisplay(bool i); // override
@@ -20,7 +20,7 @@ public:
     uint16_t getPixel(int16_t x, int16_t y);
     uint8_t *getBuffer(void);
  protected:
-    bool _init(void);
+    bool _init(bool boost);
     void lcdWrite( uint8_t type, uint8_t data );
     uint8_t *buffer = NULL; // Internal 1:1 framebuffer of display mem
   int16_t window_x1, ///< Dirty tracking window minimum x

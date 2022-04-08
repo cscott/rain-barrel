@@ -29,8 +29,8 @@ ST7529_LCD::~ST7529_LCD(void) {
     }
 }
 
-bool ST7529_LCD::begin(void) {
-    if (!_init()) {
+bool ST7529_LCD::begin(bool boost) {
+    if (!_init(boost)) {
         return false;
     }
     // set contrast
@@ -40,7 +40,7 @@ bool ST7529_LCD::begin(void) {
     return true; // success
 }
 
-bool ST7529_LCD::_init(void) {
+bool ST7529_LCD::_init(bool boost) {
     // attempt to malloc the bitmap framebuffer
     if ((!buffer) &&
         !(buffer = (uint8_t *)malloc(WIDTH * HEIGHT / (8/BPP)))) {
@@ -76,10 +76,14 @@ bool ST7529_LCD::_init(void) {
     lcdWrite( COMMAND0, 0x0094 ); // Exit sleep mode (SLPOUT)
     lcdWrite( COMMAND0, 0x00D1 ); // Internal Oscillator On (OSCON)
     lcdWrite( COMMAND0, 0x0020 ); // Power control set (PWRCTRL)
-    lcdWrite( DATA, 0x0008 ); // (Booster on, follower and reference off)
-    delay( 5 ); // Booster must be on first before other power enabled
-    lcdWrite( COMMAND0, 0x0020 ); // Power control set (PWRCTRL)
-    lcdWrite( DATA, 0x000B ); // (booster, follower & reference on)
+    if (boost) {
+        lcdWrite( DATA, 0x0008 ); // (Booster on, follower and reference off)
+        delay( 5 ); // Booster must be on first before other power enabled
+        lcdWrite( COMMAND0, 0x0020 ); // Power control set (PWRCTRL)
+        lcdWrite( DATA, 0x000B ); // (booster, follower & reference on)
+    } else {
+        lcdWrite( DATA, 0x03); // follower & reference on, VLCD external
+    }
     delay( 5 ); // Booster must be on first before other power enabled
 
     // "write contrast"

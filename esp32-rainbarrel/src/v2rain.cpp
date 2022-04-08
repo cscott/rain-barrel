@@ -7,6 +7,7 @@
 #define FLOWMETER_CONNECTED
 #define ADC_CONNECTED
 #define USE_MQTT
+#define HAS_ADP1650
 #undef DEV_MODE // shorter delays for easier development
 
 #include "Arduino.h"
@@ -37,7 +38,7 @@
 // V2 hardware features
 #include "st7529.h"
 #include "cap1298.h"
-// also adp1650.h, but that's not working yet
+#include "adp1650.h"
 // V2 pin assignments
 #if defined(ARDUINO_FEATHER_ESP32)
 # define LED_GPIO       13
@@ -107,9 +108,11 @@
 #define LCD_WIDTH 240
 #define LCD_HEIGHT 128
 ST7529_LCD display = ST7529_LCD(LCD_WIDTH, LCD_HEIGHT, LCD_RST, LCD_CS, LCD_SCL, LCD_SI);
+bool adp1650_found = false;
 
 AsyncDelay displayMaxRefresh = AsyncDelay(4 * 60 * 60 * 1000 + 11, AsyncDelay::MILLIS); // 6x a day need it or not
 AsyncDelay displayMinRefresh = AsyncDelay(13, AsyncDelay::MILLIS); // no more than once/10ms seconds
+AsyncDelay backlightDelay = AsyncDelay(60 * 1000, AsyncDelay::MILLIS); // backlight on for a minute if triggered
 
 struct ButtonPress {
   ButtonPress(): a(false), b(false), c(false), d(false), prox(false) {}
@@ -529,6 +532,52 @@ bool pollSmrtySnitch(void) {
 
 #endif
 
+bool adp1650_write(uint8_t regno, uint8_t val) {
+    Wire.beginTransmission(ADP1650_I2C_ADDR);
+    Wire.write(regno);
+    Wire.write(val);
+    uint8_t status = Wire.endTransmission();
+    if (status != 0) {
+        return false;
+    }
+    return true;
+}
+
+bool adp1650_read(uint8_t regno, uint8_t *val) {
+    Wire.beginTransmission(ADP1650_I2C_ADDR);
+    Wire.write(regno);
+    uint8_t status = Wire.endTransmission();
+    if (status != 0) {
+        return false;
+    }
+    uint8_t nBytes = Wire.requestFrom(ADP1650_I2C_ADDR, 1);
+    if (nBytes == 0) {
+        return false;
+    }
+    *val = Wire.read();
+    return true;
+}
+
+bool adp1650_set_backlight(uint8_t level) {
+    if (!adp1650_found) {
+        return false;
+    }
+    // clamp level
+    uint8_t current =
+        (level > 3) ? ADP1650_I_TOR_125MA :
+        (level > 2) ? ADP1650_I_TOR_100MA :
+        ADP1650_I_TOR_25MA;
+    adp1650_write( ADP1650_REG_CURRENT_SET, current );
+    uint8_t output_mode = ADP1650_FREQ_FB;
+    if (level > 0) {
+        output_mode |= ADP1650_OUTPUT_EN | ADP1650_LED_MOD_ASSIST;
+    } else {
+        output_mode |= ADP1650_LED_MOD_STANDBY;
+    }
+    adp1650_write( ADP1650_REG_OUTPUT_MODE, output_mode );
+    return true;
+}
+
 bool cap1298_write(uint8_t regno, uint8_t val) {
     Wire.beginTransmission(CAP1298_I2C_ADDR);
     Wire.write(regno);
@@ -648,8 +697,18 @@ void setup() {
 #endif
 #endif
 
+    adp1650_found = false;
+#ifdef HAS_ADP1650
+    uint8_t val;
+    if (adp1650_read(ADP1650_REG_DESIGN_INFO, &val) && val == 0x22) {
+        adp1650_found = true;
+    }
+#endif
     Serial.println("Display setup");
-    display.begin();
+    // XXX be extra safe and don't try to dynamically detect the adp1650
+    // because the consequences of turning on the internal booster when
+    // we've got an external supply set up are sufficiently dire.
+    display.begin(false /* !adp1650_found*/);
     Serial.println(ESP.getFreeHeap(),DEC);
     display.clearDisplay();
     display.setTextSize(1);
@@ -663,6 +722,7 @@ void setup() {
     display.println(WIFI_SSID);
     Serial.println("About to display");
     display.display();
+    adp1650_set_backlight(2); // turn on backlight while booting
 
     Serial.println("Booting");
 
@@ -793,6 +853,7 @@ void setup() {
     Serial.println(WiFi.localIP());
     displayMaxRefresh.expire();
     displayMinRefresh.expire();
+    backlightDelay.expire();
     lastPing.expire();
     connectionWatchdog.restart();
 }
@@ -1168,6 +1229,11 @@ void loop() {
       lastButtonPress = button_press;
 #endif
   }
+  if (button_press.prox) {
+      backlightDelay.restart();
+  }
+  // someday we could use an ambient light sensor here?
+  adp1650_set_backlight(backlightDelay.isExpired() ? 1 : 3);
 
 #ifdef RAINPUMP_V2
   server.handleClient();
