@@ -90,6 +90,7 @@ bool ST7529_LCD::_init(bool boost) {
     lcdWrite( COMMAND0, 0x0081 ); // Program optimum LCD supply voltage (VOLCTRL)
     lcdWrite( DATA, 0x0010 ); // VPR = 0b1 0001 0000 = 0x110 => 14.48V
     lcdWrite( DATA, 0x0004 ); // (Reset state is 0x101 => Vop = 13.88V)
+    setContrast(0x40 /* midpoint */);
 
     lcdWrite( COMMAND0, 0x00CA ); // Display control (DISCTRL)
     lcdWrite( DATA, 0x0000 ); // Clock divider = X1
@@ -272,7 +273,25 @@ void ST7529_LCD::invertDisplay(bool i) {
             display() function -- buffer contents are not changed.
 */
 void ST7529_LCD::setContrast(uint8_t level) {
-    // XXX write me
+    if (level > 0x7F) {
+        level = 0x7F;
+    }
+    contrast = level;
+
+    // Nominal VPR = 0b1 0001 0000 = 0x110 => 14.48V
+    // (Reset state is 0x101 => Vop = 13.88V)
+    uint16_t VPR = 0x110 /* nominal */ + level - 0x40 /* midpoint */;
+    lcdWrite( COMMAND0, 0x0081 ); // Program optimum LCD supply voltage (VOLCTRL)
+    lcdWrite( DATA, VPR & 0x3F );
+    lcdWrite( DATA, VPR >> 6 );
+}
+
+/*!
+    @brief  Read the display contrast.
+    @return The contrast level from 0 to 0x7F
+*/
+uint8_t ST7529_LCD::getContrast() {
+    return contrast;
 }
 
 /** Push data currently in RAM to display. */
