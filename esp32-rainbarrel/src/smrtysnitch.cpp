@@ -130,6 +130,16 @@ void receiveEvent(int numBytes) {
     for (; numBytes > 0; numBytes--) {
         Wire.read();
     }
+    // If the register requested is "high enough", toggle a GPIO (bonus feature)
+    if (register_requested >= 0xC0) {
+        uint8_t level = (register_requested & 1);
+        uint8_t pin = (register_requested >> 1) & 0x1F;
+        if (pin != SMRTY_GPIO_PIN && pin != GPIO_SDA0 && pin != GPIO_SCL0) {
+            // Sanity-check: don't let the I2C interface mess up our pin config
+            pinMode(pin, OUTPUT);
+            digitalWrite(pin, level);
+        }
+    }
 }
 
 // function that executes whenever data is requested by master
