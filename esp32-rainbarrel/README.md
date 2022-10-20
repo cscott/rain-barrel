@@ -3,8 +3,8 @@ To build:
 To upload:
  pio run -t upload
 or
- pio run -e rainpump -t upload
- pio run -e raingauge -t upload
+ pio run -e rainpump32 -t upload
+ pio run -e raingauge32 -t upload
 
 See:
 * https://community.platformio.org/t/board-definition-for-adafruit-magtag/20747/2

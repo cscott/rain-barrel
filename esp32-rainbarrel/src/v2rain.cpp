@@ -3,7 +3,7 @@
 # error Can not define both RAINPUMP_V2 and RAINGAUGE_V2, pick one!
 #endif
 
-#define MOTOR_DRIVER_CONNECTED
+#define USE_SNITCHMOTOR
 #define FLOWMETER_CONNECTED
 #define ADC_CONNECTED
 #define USE_MQTT
@@ -15,17 +15,16 @@
 #include <SPI.h> // this is done to help pio discover this dependency
 #include <AsyncDelay.h>
 
-#ifdef ESP32
-# include <WiFi.h>
-# include <ESPmDNS.h>
-#else
-# include <ESP8266WiFi.h>
-# include <ESP8266mDNS.h>
-#endif
+#include <WiFi.h>
+#include <ESPmDNS.h>
 #include <WiFiClient.h>
+#ifdef RAINPUMP_V2
+# include <WebServer.h>
+#endif
 #include <ArduinoOTA.h>
 #include <Adafruit_GFX.h>
 
+#include <HTTPClient.h>
 #include <Adafruit_MQTT.h>
 #include <Adafruit_MQTT_Client.h>
 #include <ArduinoJson.h>
@@ -46,37 +45,27 @@
 # define PRESSURE_SW    32      // F1 (pressure switch input)
 # define PUMP_CNTRL     15      // F2 (power tail out)
 # define LCD_CS         33      // F3
-# define WATER_SENSE    12      // F5 (water present, has a pull-down, boot!)
+# define WATER_SENSE    27      // F4 (water present)
+// Be careful, F5 has a pull-down and must be left alone at boot.
 # define LCD_SI         18 // MOSI
 # define LCD_SCL         5 // SCK
-#elif defined(ARDUINO_ESP8266_ADAFRUIT_HUZZAH) // FEATHER_8266
-# define LED_GPIO       -1 // steps on GPIO 0, suppress
-# define LCD_RST         2 // F0 / GPIO  2 => LCD_RST (out)
-# define PRESSURE_SW    16 // F1 / GPIO 16 => Pressure switch (in)
-# define PUMP_CNTRL      0 // F2 / GPIO  0 => Pump (out)
-# define LCD_CS         15 // F3 / GPIO 15 => LCD_CS (out)
-# define LCD_SI         13 // F4 / GPIO 13 => LCD_MOSI (out)
-# define WATER_SENSE    10 // F5 / GPIO 12 => Water sensor (in)
-# define LCD_SCL        14 // F6 / GPIO 14 => LCD_SCK
 #else
 # error Unknown pin assignments
 #endif
 
-#ifdef RAIN_SERVER_v2
-# include <Adafruit_MotorShield.h>
+#ifdef RAINPUMP_V2
+# ifdef USE_MOTORSHIELD
+#  include <Adafruit_MotorShield.h>
+# endif
 # include "flowmeter.h"
 # include "smrtysnitch.h"
 # include "smrty_decode.h"
+bool setSnitchGPIO(uint8_t which, uint8_t level);
 #endif
 #ifdef RAINGAUGE_V2
-# ifdef ESP32
-#  include <HTTPClient.h>
-# else
-#  include <ESP8266HTTPClient.h>
+# ifdef ADC_CONNECTED
+#  include <Adafruit_ADS1X15.h>
 # endif
-#ifdef ADC_CONNECTED
-# include <Adafruit_ADS1X15.h>
-#endif
 #endif
 
 #define SERVER_MDNS_NAME "rainpump"
@@ -94,6 +83,8 @@
 // 1 gal/s = 60 gal/min = 227.1246 L/min => 1839.7-3 ~= 1837Hz
 // We count both transitions, so 3673.4 ticks per gallon.
 #define TICKS_PER_GALLON 3673.4
+
+enum PumpCntrl { PUMP_OFF = 0, PUMP_ON = 1 };
 
 #define COLOR1 0x00 // was: EPD_WHITE
 #define COLOR2 0x7F // was: EPD_LIGHT
@@ -113,6 +104,10 @@ bool adp1650_found = false;
 AsyncDelay displayMaxRefresh = AsyncDelay(4 * 60 * 60 * 1000 + 11, AsyncDelay::MILLIS); // 6x a day need it or not
 AsyncDelay displayMinRefresh = AsyncDelay(13, AsyncDelay::MILLIS); // no more than once/10ms seconds
 AsyncDelay backlightDelay = AsyncDelay(60 * 1000, AsyncDelay::MILLIS); // backlight on for a minute if triggered
+
+enum DisplayState { DISPLAY_MAIN, DISPLAY_CONFIG } displayState = DISPLAY_MAIN;
+AsyncDelay configDisplayTimeout = AsyncDelay(10 * 1000, AsyncDelay::MILLIS);
+AsyncDelay configDisplayKeyRepeat = AsyncDelay(1500, AsyncDelay::MILLIS);
 
 struct ButtonPress {
   ButtonPress(): a(false), b(false), c(false), d(false), prox(false) {}
@@ -139,9 +134,7 @@ struct ButtonPress {
 ButtonPress lastButtonPress;
 
 AsyncDelay debounceDelay = AsyncDelay(250 + 1, AsyncDelay::MILLIS); // switch debounce
-#ifdef RAINGAUGE_V2
 AsyncDelay capReadInterval = AsyncDelay(50 + 3, AsyncDelay::MILLIS); // read @ 20Hz
-#endif
 
 // WiFiClientSecure for SSL/TLS support (but this is broken!)
 WiFiClientSecure client;
@@ -149,7 +142,6 @@ WiFiClientSecure client;
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
 AsyncDelay mqttDelay = AsyncDelay(15000 + 3, AsyncDelay::MILLIS); // retry every 15 seconds if not connected
 
-#ifdef ESP32
 // io.adafruit.com root CA
 const char* adafruitio_root_ca = \
     "-----BEGIN CERTIFICATE-----\n" \
@@ -174,11 +166,6 @@ const char* adafruitio_root_ca = \
     "YSEY1QSteDwsOoBrp+uvFRTp2InBuThs4pFsiv9kuXclVzDAGySj4dzp30d8tbQk\n" \
     "CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=\n" \
     "-----END CERTIFICATE-----\n";
-#else
-// io.adafruit.com SHA1 fingerprint
-static const char *adafruit_fingerprint PROGMEM = "59 3C 48 0A B1 8B 39 4E 0D 58 50 47 9A 13 55 60 CC A0 1D AF";
-//X509List cert(adafruitio_root_ca);
-#endif
 
 /****************************** Feeds ***************************************/
 
@@ -208,11 +195,17 @@ AsyncDelay connectionWatchdog = AsyncDelay(5*60*1000 + 7, AsyncDelay::MILLIS);
 
 #ifdef RAINPUMP_V2
 // Motorshield configuration
+#ifdef USE_MOTORSHIELD
 Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *cityValve = AFMS.getMotor(1);
 Adafruit_DCMotor *ground1 = AFMS.getMotor(2);
 Adafruit_DCMotor *ground2 = AFMS.getMotor(3);
 Adafruit_DCMotor *pump = AFMS.getMotor(4);
+#endif
+#ifdef USE_SNITCHMOTOR
+# define CITY_SNITCH_GPIO 0
+# define RAIN_SNITCH_GPIO 1
+#endif
 
 WebServer server(SERVER_PORT);
 AsyncDelay lastPing = AsyncDelay(3 * KEEPALIVE_INTERVAL_SECS * 1000  + 1, AsyncDelay::MILLIS);
@@ -444,6 +437,49 @@ bool readFlowMeter(uint64_t *result) {
     return false;
 }
 
+void setPumpCntrl(enum PumpCntrl is_on) {
+    digitalWrite(PUMP_CNTRL, is_on);
+#ifdef USE_MOTORSHIELD
+    pump->setSpeed(is_on ? 255 : 0);
+#endif
+}
+
+void setValve(enum PumpState state) {
+    switch (state) {
+    case STATE_CITY:
+#ifdef USE_MOTORSHIELD
+        cityValve->run(FORWARD);
+#endif
+#ifdef USE_SNITCHMOTOR
+        setSnitchGPIO(RAIN_SNITCH_GPIO, 0);
+        setSnitchGPIO(CITY_SNITCH_GPIO, 1);
+#endif
+        break;
+    case STATE_RAIN:
+#ifdef USE_MOTORSHIELD
+        cityValve->run(BACKWARD);
+#endif
+#ifdef USE_SNITCHMOTOR
+        setSnitchGPIO(CITY_SNITCH_GPIO, 0);
+        setSnitchGPIO(RAIN_SNITCH_GPIO, 1);
+#endif
+        break;
+    }
+#ifdef USE_MOTORSHIELD
+    cityValue->setSpeed(255);
+#endif
+}
+
+void idleValve() {
+#ifdef USE_MOTORSHIELD
+    cityValve->setSpeed(0);
+#endif
+#ifdef USE_SNITCHMOTOR
+    setSnitchGPIO(CITY_SNITCH_GPIO, 0);
+    setSnitchGPIO(RAIN_SNITCH_GPIO, 0);
+#endif
+}
+
 bool readSmrtySnitch(uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8_t *good_checksum) {
     Wire.beginTransmission(SNITCH_I2C_ADDR);
     Wire.write(which);
@@ -473,6 +509,14 @@ bool readSmrtySnitch(uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8
     }
     *good_checksum = (checksum == msg->checksum) ? 1 : 0;
     return true;
+}
+
+bool setSnitchGPIO(uint8_t which, uint8_t level) {
+    uint8_t seqno;
+    struct smrty_msg msg;
+    uint8_t good_checksum;
+    uint8_t cmd = (0xC0) | ((which & 0x1F) << 1) | (level & 1);
+    return readSmrtySnitch(cmd, &seqno, &msg, &good_checksum);
 }
 
 void publishSmrty(uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
@@ -677,7 +721,7 @@ void setup() {
     cap1298_setup();
 
 #ifdef RAINPUMP_V2
-#ifdef MOTOR_DRIVER_CONNECTED
+#ifdef USE_MOTORSHIELD
     // Motorshield Setup
     Serial.println("Motorshield setup");
     AFMS.begin();
@@ -687,6 +731,8 @@ void setup() {
     ground2->setSpeed(0); ground2->run(FORWARD);
     pump->setSpeed(0); pump->run(FORWARD);
 #endif
+    idleValve(); // this will handle the SNITCHMOTOR case too
+    setPumpCntrl(PUMP_OFF);
 #endif
 
 #ifdef RAINGAUGE_V2
@@ -727,24 +773,11 @@ void setup() {
     Serial.println("Booting");
 
     // Wait for connection
-#ifdef ESP32
     while (WiFi.waitForConnectResult() != WL_CONNECTED) {
         Serial.println("Connection Failed! Rebooting...");
         delay(5000);
         ESP.restart();
     }
-#else
-    int timeout = 0;
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-        timeout++;
-        if (timeout > 60) {
-            Serial.println("Connection Failed! Rebooting...");
-            ESP.restart();
-        }
-    }
-#endif
     display.print("IP: ");
     display.println(WiFi.localIP());
     display.display();
@@ -758,12 +791,7 @@ void setup() {
     }
 
     // Set Adafruit IO's root CA
-#ifdef ESP32
     client.setCACert(adafruitio_root_ca);
-#else
-    client.setFingerprint(adafruit_fingerprint);
-    //client.setTrustAnchors(&cert);
-#endif
     mqtt.connect();
 
     ArduinoOTA.setHostname(MDNS_NAME);
@@ -997,37 +1025,34 @@ void updateState() {
     }
   }
   state.connected_recently = !lastPing.isExpired();
-#ifdef MOTOR_DRIVER_CONNECTED
   // ok, now adjust settings to match selected state
   if (state.active_state == STATE_CITY) {
     // pump off
-    pump->setSpeed(0);
+    setPumpCntrl(PUMP_OFF);
     // move value to 'city'
-    cityValve->run(FORWARD);
     if (lastValveState != STATE_CITY) {
       lastValveState = STATE_CITY;
       valveStateFeedMaxDelay.expire();
 
-      cityValve->setSpeed(255);
+      setValve(STATE_CITY);
       valveRunLength.restart();
     }
   } else {
     // move valve to 'rain'
-    cityValve->run(BACKWARD);
     if (lastValveState != STATE_RAIN) {
       lastValveState = STATE_RAIN;
       valveStateFeedMaxDelay.expire();
 
-      cityValve->setSpeed(255);
+      setValve(STATE_RAIN);
       valveRunLength.restart();
     }
     // turn pump on
-    pump->setSpeed(255);
+    setPumpCntrl(PUMP_ON);
   }
   if (valveRunLength.isExpired()) {
-    cityValve->setSpeed(0);
+      idleValve();
   }
-#endif
+
   if (valveStateFeedMaxDelay.isExpired() && valveStateFeedMinDelay.isExpired() && mqtt.connected()) {
     valveStateFeed.publish( state.active_state == STATE_CITY ? "building-o" : "w:raindrops" );
     // don't reset valveStateFeedDelay, we don't need to periodically send this.
@@ -1058,9 +1083,97 @@ void leftjustify(const char *str) {
     display.print(str);
 }
 
+static uint8_t config_display_menu_selected = 0;
+
+void switchToConfigDisplay() {
+    displayState = DISPLAY_CONFIG;
+    displayMaxRefresh.expire();
+    configDisplayTimeout.restart();
+    configDisplayKeyRepeat.restart();
+    config_display_menu_selected = 0;
+}
+
+void maybeSwitchToMainDisplay() {
+  if (displayState == DISPLAY_CONFIG && configDisplayTimeout.isExpired()) {
+    displayState = DISPLAY_MAIN;
+    displayMaxRefresh.expire();
+  }
+}
+
+void updateConfigDisplay() {
+#define CONFIG_COLUMN 25
+#define CONFIG_TOP 38
+#define CONFIG_LINEHEIGHT 14
+  const char *menuItems[] = { "Increase Contrast", "Decrease Contrast", "Exit" };
+  const uint8_t num_items = (sizeof(menuItems)/sizeof(*menuItems));
+
+  if (config_display_menu_selected >= num_items) {
+    config_display_menu_selected = 0;
+  }
+
+  display.setTextSize(1);
+  normalface();
+
+  for (int i=0; i < num_items; i++) {
+    bool selected = (config_display_menu_selected == i);
+    display.setCursor(CONFIG_COLUMN, CONFIG_TOP + i*CONFIG_LINEHEIGHT);
+    display.setTextColor(selected ? COLOR3 : COLOR2);
+    display.println(menuItems[i]);
+    display.setCursor(CONFIG_COLUMN, CONFIG_TOP + i*CONFIG_LINEHEIGHT);
+    char buf[10];
+    snprintf(buf, 10, "%d. ", (i+1));
+    rightjustify(buf);
+  }
+  display.setCursor(2 /* tweak */,
+                    2 /* tweak */ + CONFIG_TOP + config_display_menu_selected * CONFIG_LINEHEIGHT);
+  boldface();
+  display.setTextColor(COLOR3);
+  display.print("*");
+
+  display.setCursor(0, CONFIG_TOP + (num_items+1)*CONFIG_LINEHEIGHT);
+  display.setTextColor(COLOR2);
+  normalface();
+  display.print("Contrast level: ");
+  display.print(display.getContrast());
+}
+
+void handleConfigDisplayButtons(ButtonPress button_press) {
+  if (!button_press.a && !button_press.b && !button_press.c && !button_press.d){
+    return;
+  }
+  configDisplayTimeout.restart();
+  configDisplayKeyRepeat.start(250, AsyncDelay::MILLIS); // quick repeat
+  displayMaxRefresh.expire();
+  if (button_press.d) {
+    displayState = DISPLAY_MAIN;
+  } else if (button_press.a) {
+    if (config_display_menu_selected > 0) {
+      config_display_menu_selected--;
+    }
+  } else if (button_press.b) {
+    config_display_menu_selected++;
+  } else if (button_press.c) {
+    switch (config_display_menu_selected) {
+    case 0:
+      display.setContrast(display.getContrast() + 1);
+      break;
+    case 1:
+      display.setContrast(display.getContrast() - 1);
+      break;
+    case 2:
+      displayState = DISPLAY_MAIN;
+      break;
+    default:
+      break;
+    }
+  }
+}
+
 void updateDisplay() {
   // transflective display update
-  if (state_equal(&state, &last_displayed_state) && !displayMaxRefresh.isExpired()) {
+  if (displayState == DISPLAY_MAIN &&
+      state_equal(&state, &last_displayed_state) &&
+      !displayMaxRefresh.isExpired()) {
     return; // don't update if nothing has changed
   }
 
@@ -1089,6 +1202,26 @@ void updateDisplay() {
 #define BAR_HEIGHT (53-26)
 #define BAR_WIDTH (LCD_WIDTH-38)
 #define BAR_SPACE (63-26)
+#define BUTTON_HEIGHT 28
+
+  if (displayState == DISPLAY_CONFIG) {
+    // Configuration screen!
+    updateConfigDisplay();
+    // Draw button guide
+    display.drawFastHLine(0, display.height() - BUTTON_HEIGHT, display.width(), COLOR3);
+    for (int i = 0; i < 3; i++) {
+      display.drawFastVLine((i + 1)*display.width() / 4, display.height() - BUTTON_HEIGHT, BUTTON_HEIGHT, COLOR3);
+    }
+    for (int i = 0; i < 4; i++) {
+      display.setCursor((2 * i + 1)*display.width() / 8, display.height() - BUTTON_HEIGHT / 2);
+      display.setTextColor(COLOR4);
+      normalface();
+      centerjustify(i == 0 ? "UP" : i == 1 ? "DOWN" : i == 2 ? "OK" : "BACK" );
+    }
+    display.display(); // or partial update?
+    return;
+  }
+
   for (int i = 0; i < 2; i++) {
     int x = display.width() / 2 - (BAR_WIDTH / 2);
     int y = BAR_TOP + i * BAR_SPACE;
@@ -1114,7 +1247,6 @@ void updateDisplay() {
     normalface();
   }
 
-#define BUTTON_HEIGHT 28
   if (client_connected_recently) {
     display.fillRect(state.user_state * display.width() / 4, display.height() - BUTTON_HEIGHT,
                      display.width() / 4, BUTTON_HEIGHT, COLOR2);
@@ -1229,6 +1361,10 @@ void loop() {
       lastButtonPress = button_press;
 #endif
   }
+  if (buttons_changed) {
+    // the first repeat delay is longer than subsequent.
+    configDisplayKeyRepeat.start(2000, AsyncDelay::MILLIS);
+  }
   if (button_press.prox) {
       backlightDelay.restart();
   }
@@ -1241,21 +1377,35 @@ void loop() {
     connectionWatchdog.restart();
   }
   // Update user state via buttons
-  if (button_press.a) {
+  if (displayState == DISPLAY_CONFIG) {
+    if (buttons_changed || configDisplayKeyRepeat.isExpired()) {
+      handleConfigDisplayButtons(button_press);
+    }
+    maybeSwitchToMainDisplay();
+  } else if (button_press.a) {
     state.user_state = STATE_CITY;
   } else if (button_press.b) {
     state.user_state = STATE_AUTO;
   } else if (button_press.c) {
     state.user_state = STATE_RAIN;
   } else if (button_press.d) {
-    /* no function in server */
+    if (buttons_changed) {
+      switchToConfigDisplay(); // Switch to configuration mode
+    }
   }
   updateState(); // read various sensors
 #endif
 #ifdef RAINGAUGE_V2
   // read buttons, if pressed immediately sent a ?state= request to the server and expire lastPing()
-  if (!buttons_changed) {
+  if (displayState == DISPLAY_CONFIG) {
+    if (buttons_changed || configDisplayKeyRepeat.isExpired()) {
+      handleConfigDisplayButtons(button_press);
+    } else {
       updateState();
+    }
+    maybeSwitchToMainDisplay();
+  } else if (!buttons_changed) {
+    updateState();
   } else if (button_press.a) {
     sendUpdate(STATE_CITY);
     displayMaxRefresh.expire();
@@ -1266,8 +1416,9 @@ void loop() {
     sendUpdate(STATE_RAIN);
     displayMaxRefresh.expire();
   } else if (button_press.d) {
+    // Force-send an update to the server
     lastPing.expire();
-    displayMaxRefresh.expire(); // force refresh
+    switchToConfigDisplay(); // Switch to configuration mode
   } else {
     updateState();
   }
