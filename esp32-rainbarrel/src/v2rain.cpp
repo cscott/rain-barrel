@@ -333,6 +333,8 @@ void handleRoot() {
 "    <p>Active water source: %s</p>\n"
 "    <pre>%3d.%d%% %3d.%d%%</pre>\n"
 "    <p>Contacted recently by rain gauge: %s</p>\n"
+"    <p>Flow meter: %ld</p>\n"
+"    <p>Pressure Switch: %s</p>\n"
 "    <img src=\"/test.svg\" />\n"
 "  </body>\n"
 "</html>",
@@ -344,7 +346,9 @@ void handleRoot() {
            state.active_state == STATE_CITY ? "City water" : "Rain barrels",
            state.water_level[0]/10, state.water_level[0]%10,
            state.water_level[1]/10, state.water_level[1]%10,
-           state.connected_recently ? "Yes" : "No"
+           state.connected_recently ? "Yes" : "No",
+           (long) (lastFlowMeterReadingValid ? lastFlowMeterReading : -1),
+           digitalRead(PRESSURE_SW) ? "OPEN" : "CLOSED"
           );
   server.send(200, "text/html", temp);
 }
@@ -383,6 +387,46 @@ void handleUpdate() {
   String out = "";
   serializeJson(doc, out);
   server.send(200, "text/json", out);
+}
+
+bool readSmrtySnitch(uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8_t *good_checksum);
+bool pollSmrtySnitch();
+
+void handleTest() {
+  char temp[800];
+  for (uint8_t i = 0; i < server.args(); i++) {
+    if (server.argName(i) == "level1") {
+    }
+  }
+  uint8_t seqno;
+  struct smrty_msg msg;
+  uint8_t good_checksum;
+  bool st = 0 ? pollSmrtySnitch() :
+      readSmrtySnitch(0xC0, &seqno, &msg, &good_checksum);
+  char mqtt_status[128] = { "CONNECTED" };
+  if (!mqtt.connected()) {
+    int ret = mqtt.connect();
+    if (ret != 0) {
+      snprintf(mqtt_status, 128, "%s", mqtt.connectErrorString(ret));
+    } else {
+      snprintf(mqtt_status, 128, "RECONNECTED");
+    }
+  }
+  snprintf(temp, 800, "<html><body><pre>\n"
+           "Return value: %s\n"
+           "[%02X] %02X %02X %02X %02X | %02X %02X %02X | %02X%s\n"
+           "</pre>"
+           "<p>MQTT: %s</p>"
+           "</body></html>",
+           st ? "true" : "false",
+           (int)seqno,
+           msg.addr, msg.cmd, msg.tx_data1, msg.tx_data2,
+           msg.rx_data1, msg.rx_data2, msg.status,
+           msg.checksum, good_checksum ? "":"*",
+           mqtt_status
+           );
+  // Output
+  server.send(200, "text/html", temp);
 }
 
 void handleNotFound() {
@@ -438,7 +482,7 @@ bool readFlowMeter(uint64_t *result) {
 }
 
 void setPumpCntrl(enum PumpCntrl is_on) {
-    digitalWrite(PUMP_CNTRL, is_on);
+    digitalWrite(PUMP_CNTRL, !is_on); // active low
 #ifdef USE_MOTORSHIELD
     pump->setSpeed(is_on ? 255 : 0);
 #endif
@@ -484,19 +528,36 @@ bool readSmrtySnitch(uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8
     Wire.beginTransmission(SNITCH_I2C_ADDR);
     Wire.write(which);
     uint8_t status = Wire.endTransmission();
+    uint8_t tries = 0;
     if (status != 0) {
         return false; // no response from client, must be disconnected
     }
     uint8_t reg, nBytes;
-    do {
+#define FLUSH(readSoFar)                                \
+    do {                                                \
+        for (nBytes-=readSoFar; nBytes != 0; nBytes--) {  \
+            Wire.read();                                \
+        }                                               \
+    } while (false)
+    while (true) {
         nBytes = Wire.requestFrom(SNITCH_I2C_ADDR, 10);
         if (nBytes == 0) {
             return false; /* unexpected! */
         }
         reg = Wire.read();
-    } while (reg != which);  // busy loop until reg. write is done
+        if (reg == which) {
+            break; // reg write is done!
+        }
+        FLUSH(1);
+        // busy loop until reg. write is done, should be quick
+        if ((++tries) > 3) {
+            return false; // but don't get stuck here forever
+        }
+    }
     if (nBytes < 10) {
-        return false; /* incomplete read for some reason */
+         /* incomplete read for some reason */
+        FLUSH(1);
+        return false;
     }
     *seqno = Wire.read();
     uint8_t checksum = 0;
@@ -508,6 +569,7 @@ bool readSmrtySnitch(uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8
         }
     }
     *good_checksum = (checksum == msg->checksum) ? 1 : 0;
+    FLUSH(10);
     return true;
 }
 
@@ -703,7 +765,7 @@ void setup() {
 
 #ifdef RAINPUMP_V2
     pinMode(WATER_SENSE, INPUT_PULLUP);
-    pinMode(PRESSURE_SW, INPUT_PULLUP);
+    pinMode(PRESSURE_SW, INPUT);
     pinMode(PUMP_CNTRL, OUTPUT);
 #endif
 
@@ -866,6 +928,7 @@ void setup() {
         server.send(200, "text/plain", "this works as well");
     });
     server.on("/update", handleUpdate);
+    server.on("/test", handleTest);
     server.onNotFound(handleNotFound);
     server.begin();
     MDNS.addService("http", "tcp", SERVER_PORT);
@@ -1025,32 +1088,19 @@ void updateState() {
     }
   }
   state.connected_recently = !lastPing.isExpired();
+
   // ok, now adjust settings to match selected state
-  if (state.active_state == STATE_CITY) {
-    // pump off
-    setPumpCntrl(PUMP_OFF);
-    // move value to 'city'
-    if (lastValveState != STATE_CITY) {
-      lastValveState = STATE_CITY;
-      valveStateFeedMaxDelay.expire();
-
-      setValve(STATE_CITY);
-      valveRunLength.restart();
-    }
-  } else {
-    // move valve to 'rain'
-    if (lastValveState != STATE_RAIN) {
-      lastValveState = STATE_RAIN;
-      valveStateFeedMaxDelay.expire();
-
-      setValve(STATE_RAIN);
-      valveRunLength.restart();
-    }
-    // turn pump on
-    setPumpCntrl(PUMP_ON);
-  }
-  if (valveRunLength.isExpired()) {
-      idleValve();
+  static bool not_idled = true;
+  if (lastValveState != state.active_state) {
+    lastValveState = state.active_state;
+    valveStateFeedMaxDelay.expire();
+    valveRunLength.restart();
+    setPumpCntrl((state.active_state == STATE_CITY) ? PUMP_OFF : PUMP_ON);
+    setValve((enum PumpState)state.active_state);
+    not_idled = true;
+  } else if (not_idled && valveRunLength.isExpired()) {
+    idleValve();
+    not_idled = false;
   }
 
   if (valveStateFeedMaxDelay.isExpired() && valveStateFeedMinDelay.isExpired() && mqtt.connected()) {
@@ -1106,6 +1156,7 @@ void updateConfigDisplay() {
 #define CONFIG_LINEHEIGHT 14
   const char *menuItems[] = { "Increase Contrast", "Decrease Contrast", "Exit" };
   const uint8_t num_items = (sizeof(menuItems)/sizeof(*menuItems));
+  char buf[10];
 
   if (config_display_menu_selected >= num_items) {
     config_display_menu_selected = 0;
@@ -1120,7 +1171,6 @@ void updateConfigDisplay() {
     display.setTextColor(selected ? COLOR3 : COLOR2);
     display.println(menuItems[i]);
     display.setCursor(CONFIG_COLUMN, CONFIG_TOP + i*CONFIG_LINEHEIGHT);
-    char buf[10];
     snprintf(buf, 10, "%d. ", (i+1));
     rightjustify(buf);
   }
@@ -1133,8 +1183,19 @@ void updateConfigDisplay() {
   display.setCursor(0, CONFIG_TOP + (num_items+1)*CONFIG_LINEHEIGHT);
   display.setTextColor(COLOR2);
   normalface();
-  display.print("Contrast level: ");
+  display.print("Contrast: ");
   display.print(display.getContrast());
+#ifdef RAINPUMP_V2
+  display.print(" Flow: ");
+  if (lastFlowMeterReadingValid) {
+    display.print(lastFlowMeterReading);
+  } else {
+    display.print("-");
+  }
+  display.print(" SMRTY: ");
+  snprintf(buf, 10, "%02X", smrtyLastSeqno);
+  display.print(buf);
+#endif
 }
 
 void handleConfigDisplayButtons(ButtonPress button_press) {
@@ -1338,9 +1399,9 @@ void loop() {
     if (ret != 0) {
         Serial.print("MQTT: ");
         Serial.println(mqtt.connectErrorString(ret));
+        mqtt.disconnect();
+        mqttDelay.restart();
     }
-    mqtt.disconnect();
-    mqttDelay.restart();
   }
 #endif
   // Update user state via buttons
