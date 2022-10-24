@@ -4,14 +4,15 @@
 #include <Wire.h>
 #include "smrtysnitch.h"
 #include "smrty_decode.h"
+#include "pico/binary_info.h"
 
-#define EARLPHILHOWER
+#define EARLEPHILHOWER
 //#define DEBUGGING
 //#define USE_MUTEX
 //#define LED_SHOW_WATCHDOG
 
 // safety first
-#ifdef EARLPHILHOWER
+#ifdef EARLEPHILHOWER
 # define WireX Wire1
 # include <FreeRTOS.h>
 # include <semphr.h>
@@ -89,6 +90,11 @@ void receiveEvent(int numBytes);
 
 // the setup routine runs once when you press reset:
 void setup() {
+    bi_decl(bi_program_name("SMRTY snitch"));
+    bi_decl(bi_program_description("I2C slave that reports decoding SMRTY information"));
+    bi_decl(bi_1pin_with_name(SMRTY_GPIO_PIN, "SMRTY transition input"));
+    bi_decl(bi_2pins_with_func(GPIO_SDA0, GPIO_SCL0, GPIO_FUNC_I2C));
+    bi_decl(bi_1pin_with_name(LED_BUILTIN, "Debugging LED"));
 #ifdef USE_MUTEX
   MUTEX_INIT();
 #endif
@@ -109,9 +115,9 @@ void setup() {
   INPUT_NO_PULL(GPIO_SCL1);
   // This will be *either* GPIO_Sxx0 (old ArduinoCore-mbed) *or* GPIO_Sxx1
   // (latest ArduinoCore-mbed). Sigh. We'll run wires to both.
-#ifdef EARLPHILHOWER
-  WireX.setSDA(GPIO_SDA0); // earlphilhower port only
-  WireX.setSCL(GPIO_SCL0); // earlphilhower port only
+#ifdef EARLEPHILHOWER
+  WireX.setSDA(GPIO_SDA0); // earlephilhower port only
+  WireX.setSCL(GPIO_SCL0); // earlephilhower port only
 #endif
   WireX.begin(SNITCH_I2C_ADDR); // join i2c bus with address
   WireX.onReceive(receiveEvent); // register event (bytes from master)
