@@ -1,5 +1,5 @@
 // This file is used to test the flowmeter as well as the smrty snitch
-#if defined(FLOWTESTER) || defined(SNITCH_TESTER)
+#if defined(FLOW_TESTER) || defined(SNITCH_TESTER)
 #include "Arduino.h"
 #include <Wire.h>
 #include <AsyncDelay.h>
@@ -248,4 +248,4 @@ void loop() {
 #endif
 }
 
-#endif /* FLOWTESTER */
+#endif /* FLOW_TESTER || SNITCH_TESTER */
