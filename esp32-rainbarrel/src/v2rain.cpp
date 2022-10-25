@@ -203,8 +203,8 @@ Adafruit_DCMotor *ground2 = AFMS.getMotor(3);
 Adafruit_DCMotor *pump = AFMS.getMotor(4);
 #endif
 #ifdef USE_SNITCHMOTOR
-# define CITY_SNITCH_GPIO 0
-# define RAIN_SNITCH_GPIO 1
+# define CITY_SNITCH_GPIO 1
+# define RAIN_SNITCH_GPIO 0
 #endif
 
 WebServer server(SERVER_PORT);
