@@ -299,12 +299,19 @@ SystemState last_xmit_state = state;
 
 void updateState();
 
+void smallface() {
+  display.setFont();
+  display.setTextSize(1);
+}
+
 void normalface() {
   display.setFont(&bluehigh10pt7b);
+  display.setTextSize(1);
 }
 
 void boldface() {
   display.setFont(&bluebold11pt7b);
+  display.setTextSize(1);
 }
 
 #ifdef RAINPUMP_V2
@@ -819,7 +826,6 @@ void setup() {
     display.begin(false /* !adp1650_found*/);
     Serial.println(ESP.getFreeHeap(),DEC);
     display.clearDisplay();
-    display.setTextSize(1);
     display.setTextColor(COLOR4);
     boldface();
     display.setCursor(0, 20);
@@ -1162,7 +1168,6 @@ void updateConfigDisplay() {
     config_display_menu_selected = 0;
   }
 
-  display.setTextSize(1);
   normalface();
 
   for (int i=0; i < num_items; i++) {
@@ -1180,19 +1185,21 @@ void updateConfigDisplay() {
   display.setTextColor(COLOR3);
   display.print("*");
 
+  smallface();
   display.setCursor(0, CONFIG_TOP + (num_items+1)*CONFIG_LINEHEIGHT);
   display.setTextColor(COLOR2);
-  normalface();
-  display.print("Contrast: ");
+  display.print("Cntrst:");
   display.print(display.getContrast());
 #ifdef RAINPUMP_V2
-  display.print(" Flow: ");
+  display.print(" Flow:");
   if (lastFlowMeterReadingValid) {
     display.print(lastFlowMeterReading);
   } else {
     display.print("-");
   }
-  display.print(" SMRTY: ");
+  display.print(" Press:");
+  display.print(digitalRead(PRESSURE_SW)?"OP":"CL");
+  display.print(" SMRTY:");
   snprintf(buf, 10, "%02X", smrtyLastSeqno);
   display.print(buf);
 #endif
@@ -1254,7 +1261,6 @@ void updateDisplay() {
   normalface();
   display.setTextColor(COLOR3);
   display.setCursor(4, 17);
-  display.setTextSize(1);
   display.print(WiFi.localIP());
   display.setCursor(display.width() - 4, 17);
   rightjustify(MDNS_NAME ".local");
