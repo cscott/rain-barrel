@@ -85,6 +85,8 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
 // 1 gal/s = 60 gal/min = 227.1246 L/min => 1839.7-3 ~= 1837Hz
 // We count both transitions, so 3673.4 ticks per gallon.
 #define TICKS_PER_GALLON 3673.4
+#define FLOW_TO_GALLONS(oldFlow, newFlow) \
+  ((newFlow - oldFlow) / (double)TICKS_PER_GALLON)
 
 enum PumpCntrl { PUMP_OFF = 0, PUMP_ON = 1 };
 
@@ -180,7 +182,8 @@ const char* adafruitio_root_ca = \
 // Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
 #define FEED_PREFIX AIO_USERNAME "/feeds/rain-barrels."
 #ifdef RAINPUMP_V2
-AsyncDelay valveStateFeedMaxDelay = AsyncDelay(1*HOURS_MS + 1, AsyncDelay::MILLIS); // at least 1/hr
+// Update valve state every ~5 minutes; this is the MQTT keepalive.
+AsyncDelay valveStateFeedMaxDelay = AsyncDelay(5*MINUTES_MS - 1019, AsyncDelay::MILLIS);
 AsyncDelay valveStateFeedMinDelay = AsyncDelay(1*SECONDS_MS + 13, AsyncDelay::MILLIS); // not more than 1/second
 Adafruit_MQTT_Publish valveStateFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "water-source");
 #endif /* RAINPUMP_V2 */
@@ -225,12 +228,19 @@ AsyncDelay valveRunLength = AsyncDelay(1 * MINUTES_MS + 13, AsyncDelay::MILLIS);
 // This interval is offset just a smidge because we ideally want to bin the
 // flow per minute. But being .002% too high shouldn't matter.
 // But do try to generate at least 1 data point per day
-uint64_t lastFlowMeterReading = 0;
-bool lastFlowMeterReadingValid = false;
-AsyncDelay flowMeterInterval = AsyncDelay(1 * MINUTES_MS - 1, AsyncDelay::MILLIS);
-AsyncDelay flowMeterIntervalMax = AsyncDelay(24 * HOURS_MS - 7, AsyncDelay::MILLIS);
+uint64_t lastFlowMeterReading = 0, yesterdaysFlowMeterReading = 0;
+bool lastFlowMeterReadingValid = false, yesterdaysFlowMeterReadingValid = false;
+AsyncDelay flowMeterInterval = AsyncDelay(1*MINUTES_MS - 1, AsyncDelay::MILLIS);
+AsyncDelay flowMeterIntervalMax = AsyncDelay(12 * HOURS_MS - 7, AsyncDelay::MILLIS);
 #ifdef USE_MQTT
 Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "irrigation-flow");
+Adafruit_MQTT_Publish flowMeterDailyFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "daily-irrigation-flow");
+// This is actually just shy of once a day, we'll sync w/ the adafruit time
+// service to ensure it happens exactly on the first hour boundary after
+// water flows for the first time.
+AsyncDelay flowOnceADay = AsyncDelay(24 * HOURS_MS - (40 * MINUTES_MS), AsyncDelay::MILLIS);
+Adafruit_MQTT_Subscribe hourlyFeed = Adafruit_MQTT_Subscribe(&mqtt, "time/hours");
+void hourlyCallback(char *val, uint16_t len);
 
 Adafruit_MQTT_Publish smrtyRawFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-raw");
 Adafruit_MQTT_Publish soilMoistureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-moisture");
@@ -327,12 +337,12 @@ void boldface() {
 #ifdef RAINPUMP_V2
 // Web server
 void handleRoot() {
-  char temp[800];
+  char temp[850];
   int sec = millis() / 1000;
   int min = sec / 60;
   int hr = min / 60;
 
-  snprintf(temp, 800,
+  snprintf(temp, 850,
 
            "<html>\n"
 "  <head>\n"
@@ -350,7 +360,8 @@ void handleRoot() {
 "    <p>Active water source: %s</p>\n"
 "    <pre>%3d.%d%% %3d.%d%%</pre>\n"
 "    <p>Contacted recently by rain gauge: %s</p>\n"
-"    <p>Flow meter: %ld</p>\n"
+"    <p>Total flow: %.1lf gallons (raw count: %ld)</p>\n"
+"    <p>Today's flow: %.1lf gallons</p>\n"
 "    <p>Pressure Switch: %s</p>\n"
 "    <img src=\"/test.svg\" />\n"
 "  </body>\n"
@@ -364,7 +375,9 @@ void handleRoot() {
            state.water_level[0]/10, state.water_level[0]%10,
            state.water_level[1]/10, state.water_level[1]%10,
            state.connected_recently ? "Yes" : "No",
+           (double) (lastFlowMeterReadingValid ? FLOW_TO_GALLONS(0, lastFlowMeterReading) : -1),
            (long) (lastFlowMeterReadingValid ? lastFlowMeterReading : -1),
+           (double) (lastFlowMeterReadingValid && yesterdaysFlowMeterReadingValid ? FLOW_TO_GALLONS(yesterdaysFlowMeterReading, lastFlowMeterReading) : -1),
            digitalRead(PRESSURE_SW) ? "OPEN" : "CLOSED"
           );
   server.send(200, "text/html", temp);
@@ -880,6 +893,11 @@ void setup() {
     // Set Adafruit IO's root CA
     client.setCACert(adafruitio_root_ca);
 #ifdef USE_MQTT
+#ifdef RAINPUMP_V2
+    mqtt.subscribe(&hourlyFeed);
+    hourlyFeed.setCallback(hourlyCallback);
+    flowOnceADay.restart();
+#endif
     mqtt.connect();
 #endif
 
@@ -1018,6 +1036,25 @@ void sendUpdate(int new_user_state = -1) {
 }
 #endif
 
+#if defined(USE_MQTT) && defined(RAINPUMP_V2)
+void hourlyCallback(char *val, uint16_t len) {
+  if (flowOnceADay.isExpired()) {
+    lastFlowMeterReadingValid = readFlowMeter(&lastFlowMeterReading);
+    if (lastFlowMeterReadingValid) {
+      double gallons = FLOW_TO_GALLONS(yesterdaysFlowMeterReading, lastFlowMeterReading);
+      if (mqtt.connected()) {
+        flowMeterDailyFeed.publish(gallons);
+      }
+      yesterdaysFlowMeterReading = lastFlowMeterReading;
+      yesterdaysFlowMeterReadingValid = true;
+    } else {
+      yesterdaysFlowMeterReadingValid = false;
+    }
+    flowOnceADay.restart();
+  }
+}
+#endif /* USE_MQTT && RAINPUMP_V2 */
+
 void updateState() {
 #ifdef RAINGAUGE_V2
   if (lastLevelReading.isExpired()) {
@@ -1077,10 +1114,16 @@ void updateState() {
     } else {
       // don't fill the log with a lot of unnecessary zeroes
       if (newFlow != lastFlowMeterReading || flowMeterIntervalMax.isExpired()) {
-        double gallons = (newFlow - lastFlowMeterReading) / (double)TICKS_PER_GALLON;
+        double gallons = FLOW_TO_GALLONS(lastFlowMeterReading, newFlow);
 #ifdef USE_MQTT
         if (mqtt.connected()) {
           flowMeterFeed.publish(gallons);
+        }
+        if (!yesterdaysFlowMeterReadingValid) {
+          // This is the first flow of the day since startup
+          yesterdaysFlowMeterReading = lastFlowMeterReading;
+          yesterdaysFlowMeterReadingValid = true;
+          flowOnceADay.restart(); // resync to next hour
         }
 #endif
         lastFlowMeterReading = newFlow;
@@ -1219,6 +1262,12 @@ void updateConfigDisplay() {
   display.print(display.getContrast());
 #ifdef RAINPUMP_V2
   display.print(" Flow:");
+  if (yesterdaysFlowMeterReadingValid) {
+    display.print(yesterdaysFlowMeterReading);
+  } else {
+    display.print("-");
+  }
+  display.print("=>");
   if (lastFlowMeterReadingValid) {
     display.print(lastFlowMeterReading);
   } else {
@@ -1470,6 +1519,9 @@ void loop() {
   if (WiFi.isConnected()) {
     connectionWatchdog.restart();
   }
+#ifdef USE_MQTT
+  mqtt.processPackets(0);
+#endif
   // Update user state via buttons
   if (displayState == DISPLAY_CONFIG) {
     if (buttons_changed || configDisplayKeyRepeat.isExpired()) {
