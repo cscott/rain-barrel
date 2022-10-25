@@ -97,18 +97,21 @@ enum PumpCntrl { PUMP_OFF = 0, PUMP_ON = 1 };
 // to make the interval a prime # of milliseconds.  This ensures that intervals
 // will tend to space themselves out over time and not all pile up at the same
 // millisecond boundary.
+#define SECONDS_MS (1000)
+#define MINUTES_MS (60 * SECONDS_MS)
+#define HOURS_MS (60 * MINUTES_MS)
 
 #define LCD_WIDTH 240
 #define LCD_HEIGHT 128
 ST7529_LCD display = ST7529_LCD(LCD_WIDTH, LCD_HEIGHT, LCD_RST, LCD_CS, LCD_SCL, LCD_SI);
 bool adp1650_found = false;
 
-AsyncDelay displayMaxRefresh = AsyncDelay(4 * 60 * 60 * 1000 + 11, AsyncDelay::MILLIS); // 6x a day need it or not
+AsyncDelay displayMaxRefresh = AsyncDelay(4 * HOURS_MS + 11, AsyncDelay::MILLIS); // 6x a day need it or not
 AsyncDelay displayMinRefresh = AsyncDelay(13, AsyncDelay::MILLIS); // no more than once/10ms seconds
-AsyncDelay backlightDelay = AsyncDelay(60 * 1000, AsyncDelay::MILLIS); // backlight on for a minute if triggered
+AsyncDelay backlightDelay = AsyncDelay(1 * MINUTES_MS, AsyncDelay::MILLIS); // backlight on for a minute if triggered
 
 enum DisplayState { DISPLAY_MAIN, DISPLAY_CONFIG } displayState = DISPLAY_MAIN;
-AsyncDelay configDisplayTimeout = AsyncDelay(10 * 1000, AsyncDelay::MILLIS);
+AsyncDelay configDisplayTimeout = AsyncDelay(30 * SECONDS_MS, AsyncDelay::MILLIS);
 AsyncDelay configDisplayKeyRepeat = AsyncDelay(1500, AsyncDelay::MILLIS);
 
 struct ButtonPress {
@@ -143,7 +146,7 @@ WiFiClientSecure client;
 #ifdef USE_MQTT
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
-AsyncDelay mqttDelay = AsyncDelay(15000 + 3, AsyncDelay::MILLIS); // retry every 15 seconds if not connected
+AsyncDelay mqttDelay = AsyncDelay(15 * SECONDS_MS + 3, AsyncDelay::MILLIS); // retry every 15 seconds if not connected
 #endif
 
 // io.adafruit.com root CA
@@ -177,13 +180,13 @@ const char* adafruitio_root_ca = \
 // Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
 #define FEED_PREFIX AIO_USERNAME "/feeds/rain-barrels."
 #ifdef RAINPUMP_V2
-AsyncDelay valveStateFeedMaxDelay = AsyncDelay(60*60*1000 + 1, AsyncDelay::MILLIS); // at least 1/hr
-AsyncDelay valveStateFeedMinDelay = AsyncDelay(1000 + 13, AsyncDelay::MILLIS); // not more than 1/second
+AsyncDelay valveStateFeedMaxDelay = AsyncDelay(1*HOURS_MS + 1, AsyncDelay::MILLIS); // at least 1/hr
+AsyncDelay valveStateFeedMinDelay = AsyncDelay(1*SECONDS_MS + 13, AsyncDelay::MILLIS); // not more than 1/second
 Adafruit_MQTT_Publish valveStateFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "water-source");
 #endif /* RAINPUMP_V2 */
 #ifdef RAINGAUGE_V2
 // 11s so they don't hit at the same time as the SMRT-Y poll, which is 9s
-AsyncDelay waterLevelFeedDelay = AsyncDelay(11*1000 + 3, AsyncDelay::MILLIS); // every ~10s
+AsyncDelay waterLevelFeedDelay = AsyncDelay(11*SECONDS_MS + 3, AsyncDelay::MILLIS); // every ~10s
 Adafruit_MQTT_Publish waterLevel1Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel1");
 Adafruit_MQTT_Publish waterLevel2Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel2");
 #endif /* RAINGAUGE_V2 */
@@ -196,7 +199,7 @@ Adafruit_MQTT_Publish waterLevel2Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX
 # define MDNS_NAME CLIENT_MDNS_NAME
 #endif
 
-AsyncDelay connectionWatchdog = AsyncDelay(5*60*1000 + 7, AsyncDelay::MILLIS);
+AsyncDelay connectionWatchdog = AsyncDelay(5*MINUTES_MS + 7, AsyncDelay::MILLIS);
 
 #ifdef RAINPUMP_V2
 // Motorshield configuration
@@ -213,19 +216,19 @@ Adafruit_DCMotor *pump = AFMS.getMotor(4);
 #endif
 
 WebServer server(SERVER_PORT);
-AsyncDelay lastPing = AsyncDelay(3 * KEEPALIVE_INTERVAL_SECS * 1000  + 1, AsyncDelay::MILLIS);
+AsyncDelay lastPing = AsyncDelay(3 * KEEPALIVE_INTERVAL_SECS * SECONDS_MS  + 1, AsyncDelay::MILLIS);
 // The valve seems to get hot if you keep it activated -- though it should not!  Anyway, only
 // run the valve for a minute when it changes state.
 int lastValveState = -1;
-AsyncDelay valveRunLength = AsyncDelay(60 * 1000 + 13, AsyncDelay::MILLIS);
+AsyncDelay valveRunLength = AsyncDelay(1 * MINUTES_MS + 13, AsyncDelay::MILLIS);
 
 // This interval is offset just a smidge because we ideally want to bin the
 // flow per minute. But being .002% too high shouldn't matter.
 // But do try to generate at least 1 data point per day
 uint64_t lastFlowMeterReading = 0;
 bool lastFlowMeterReadingValid = false;
-AsyncDelay flowMeterInterval = AsyncDelay(60 * 1000 - 1, AsyncDelay::MILLIS);
-AsyncDelay flowMeterIntervalMax = AsyncDelay(24 * 60 * 60 * 1000 - 7, AsyncDelay::MILLIS);
+AsyncDelay flowMeterInterval = AsyncDelay(1 * MINUTES_MS - 1, AsyncDelay::MILLIS);
+AsyncDelay flowMeterIntervalMax = AsyncDelay(24 * HOURS_MS - 7, AsyncDelay::MILLIS);
 #ifdef USE_MQTT
 Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "irrigation-flow");
 
@@ -235,7 +238,7 @@ Adafruit_MQTT_Publish soilTemperatureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PR
 // This is polling delay; it is also minimum MQTT publish interval so we don't
 // get throttled.
 // 9s so they don't hit at the same time as the water level poll, which is 11s
-AsyncDelay smrtyInterval = AsyncDelay(9 * 1000 + 1, AsyncDelay::MILLIS);
+AsyncDelay smrtyInterval = AsyncDelay(9 * SECONDS_MS + 1, AsyncDelay::MILLIS);
 #endif /* USE_MQTT */
 uint8_t smrtyLastSeqno = 0xFF;
 #endif
@@ -245,7 +248,7 @@ uint8_t smrtyLastSeqno = 0xFF;
 Adafruit_ADS1115 ads1115;
 #endif
 AsyncDelay lastLevelReading = AsyncDelay(100, AsyncDelay::MILLIS);
-AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * 1000 - 1, AsyncDelay::MILLIS);
+AsyncDelay lastPing = AsyncDelay(KEEPALIVE_INTERVAL_SECS * SECONDS_MS - 1, AsyncDelay::MILLIS);
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 
 // It would really be nice if we could do this filtering on the analog
@@ -1420,7 +1423,7 @@ void updateDisplay() {
 void loop() {
   ArduinoOTA.handle();
   if (connectionWatchdog.isExpired()) {
-    delay(5000);
+    delay(5*SECONDS_MS);
     ESP.restart();
   }
 #ifdef USE_MQTT
@@ -1454,7 +1457,7 @@ void loop() {
   }
   if (buttons_changed) {
     // the first repeat delay is longer than subsequent.
-    configDisplayKeyRepeat.start(2000, AsyncDelay::MILLIS);
+    configDisplayKeyRepeat.start(2*SECONDS_MS, AsyncDelay::MILLIS);
   }
   if (button_press.prox) {
       backlightDelay.restart();
