@@ -837,6 +837,9 @@ void setup() {
     // because the consequences of turning on the internal booster when
     // we've got an external supply set up are sufficiently dire.
     display.begin(false /* !adp1650_found*/);
+#ifdef RAINGAUGE_V2
+    display.setContrast(83); // different default contrast for outdoors
+#endif
     Serial.println(ESP.getFreeHeap(),DEC);
     display.clearDisplay();
     display.setTextColor(COLOR4);
