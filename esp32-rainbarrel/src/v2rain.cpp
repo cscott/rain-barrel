@@ -25,8 +25,10 @@
 #include <Adafruit_GFX.h>
 
 #include <HTTPClient.h>
-#include <Adafruit_MQTT.h>
-#include <Adafruit_MQTT_Client.h>
+#ifdef USE_MQTT
+# include <Adafruit_MQTT.h>
+# include <Adafruit_MQTT_Client.h>
+#endif
 #include <ArduinoJson.h>
 #include <AsyncDelay.h>
 #include "config.h"
@@ -138,9 +140,11 @@ AsyncDelay capReadInterval = AsyncDelay(50 + 3, AsyncDelay::MILLIS); // read @ 2
 
 // WiFiClientSecure for SSL/TLS support (but this is broken!)
 WiFiClientSecure client;
+#ifdef USE_MQTT
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
 AsyncDelay mqttDelay = AsyncDelay(15000 + 3, AsyncDelay::MILLIS); // retry every 15 seconds if not connected
+#endif
 
 // io.adafruit.com root CA
 const char* adafruitio_root_ca = \
@@ -169,20 +173,21 @@ const char* adafruitio_root_ca = \
 
 /****************************** Feeds ***************************************/
 
-// Setup a feed called 'test' for publishing.
+#ifdef USE_MQTT
 // Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
 #define FEED_PREFIX AIO_USERNAME "/feeds/rain-barrels."
 #ifdef RAINPUMP_V2
 AsyncDelay valveStateFeedMaxDelay = AsyncDelay(60*60*1000 + 1, AsyncDelay::MILLIS); // at least 1/hr
 AsyncDelay valveStateFeedMinDelay = AsyncDelay(1000 + 13, AsyncDelay::MILLIS); // not more than 1/second
 Adafruit_MQTT_Publish valveStateFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "water-source");
-#endif
+#endif /* RAINPUMP_V2 */
 #ifdef RAINGAUGE_V2
 // 11s so they don't hit at the same time as the SMRT-Y poll, which is 9s
 AsyncDelay waterLevelFeedDelay = AsyncDelay(11*1000 + 3, AsyncDelay::MILLIS); // every ~10s
 Adafruit_MQTT_Publish waterLevel1Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel1");
 Adafruit_MQTT_Publish waterLevel2Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel2");
-#endif
+#endif /* RAINGAUGE_V2 */
+#endif /* USE_MQTT */
 
 #ifdef RAINPUMP_V2
 # define MDNS_NAME SERVER_MDNS_NAME
@@ -221,6 +226,7 @@ uint64_t lastFlowMeterReading = 0;
 bool lastFlowMeterReadingValid = false;
 AsyncDelay flowMeterInterval = AsyncDelay(60 * 1000 - 1, AsyncDelay::MILLIS);
 AsyncDelay flowMeterIntervalMax = AsyncDelay(24 * 60 * 60 * 1000 - 7, AsyncDelay::MILLIS);
+#ifdef USE_MQTT
 Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "irrigation-flow");
 
 Adafruit_MQTT_Publish smrtyRawFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-raw");
@@ -230,6 +236,7 @@ Adafruit_MQTT_Publish soilTemperatureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PR
 // get throttled.
 // 9s so they don't hit at the same time as the water level poll, which is 11s
 AsyncDelay smrtyInterval = AsyncDelay(9 * 1000 + 1, AsyncDelay::MILLIS);
+#endif /* USE_MQTT */
 uint8_t smrtyLastSeqno = 0xFF;
 #endif
 
@@ -410,6 +417,7 @@ void handleTest() {
   uint8_t good_checksum;
   bool st = 0 ? pollSmrtySnitch() :
       readSmrtySnitch(0xC0, &seqno, &msg, &good_checksum);
+#ifdef USE_MQTT
   char mqtt_status[128] = { "CONNECTED" };
   if (!mqtt.connected()) {
     int ret = mqtt.connect();
@@ -419,6 +427,9 @@ void handleTest() {
       snprintf(mqtt_status, 128, "RECONNECTED");
     }
   }
+#else
+  const char *mqtt_status = "N/A";
+#endif
   snprintf(temp, 800, "<html><body><pre>\n"
            "Return value: %s\n"
            "[%02X] %02X %02X %02X %02X | %02X %02X %02X | %02X%s\n"
@@ -589,6 +600,7 @@ bool setSnitchGPIO(uint8_t which, uint8_t level) {
 }
 
 void publishSmrty(uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
+#ifdef USE_MQTT
     const char *fmt = "[%02X] %02X %02X %02X %02X | %02X %02X %02X | %02X%s";
     char buf[strlen(fmt)+1]; // string will be shorter than this
     snprintf(buf, strlen(fmt)+1, fmt, seqno,
@@ -615,6 +627,7 @@ void publishSmrty(uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
     default:
         break;
     }
+#endif /* USE_MQTT */
 }
 
 bool pollSmrtySnitch(void) {
@@ -860,7 +873,9 @@ void setup() {
 
     // Set Adafruit IO's root CA
     client.setCACert(adafruitio_root_ca);
+#ifdef USE_MQTT
     mqtt.connect();
+#endif
 
     ArduinoOTA.setHostname(MDNS_NAME);
     ArduinoOTA.setPassword(OTA_PASSWD);
@@ -1046,34 +1061,36 @@ void updateState() {
   // read flow meter at intervals
   if (flowMeterInterval.isExpired()) {
     flowMeterInterval.repeat();
-    if (mqtt.connected()) {
-        uint64_t newFlow;
-        bool valid = readFlowMeter(&newFlow);
-        if (!valid) {
-            lastFlowMeterReadingValid = false;
-        } else if (!lastFlowMeterReadingValid) {
-            lastFlowMeterReading = newFlow;
-            lastFlowMeterReadingValid = true;
-        } else {
-            double gallons = (newFlow - lastFlowMeterReading) / (double)TICKS_PER_GALLON;
-            // don't fill the log with a lot of unnecessary zeroes
-            if (newFlow != lastFlowMeterReading ||
-                flowMeterIntervalMax.isExpired()) {
-                if (flowMeterFeed.publish(gallons)) {
-                    lastFlowMeterReading = newFlow;
-                    flowMeterIntervalMax.repeat();
-                }
-            }
+    uint64_t newFlow;
+    bool valid = readFlowMeter(&newFlow);
+    if (!valid) {
+      lastFlowMeterReadingValid = false;
+    } else if (!lastFlowMeterReadingValid) {
+      lastFlowMeterReading = newFlow;
+      lastFlowMeterReadingValid = true;
+    } else {
+      // don't fill the log with a lot of unnecessary zeroes
+      if (newFlow != lastFlowMeterReading || flowMeterIntervalMax.isExpired()) {
+        double gallons = (newFlow - lastFlowMeterReading) / (double)TICKS_PER_GALLON;
+#ifdef USE_MQTT
+        if (mqtt.connected()) {
+          flowMeterFeed.publish(gallons);
         }
+#endif
+        lastFlowMeterReading = newFlow;
+        flowMeterIntervalMax.repeat();
+      }
     }
   }
   // read the SMRTY snitch at interval
+#ifdef USE_MQTT
   if (smrtyInterval.isExpired()) {
       smrtyInterval.restart();
       if (mqtt.connected()) {
           pollSmrtySnitch();
       }
   }
+#endif
   // read our pipe water sensor
   state.pipe_water_present = !digitalRead(WATER_SENSE);
 
@@ -1099,7 +1116,9 @@ void updateState() {
   static bool not_idled = true;
   if (lastValveState != state.active_state) {
     lastValveState = state.active_state;
+#ifdef USE_MQTT
     valveStateFeedMaxDelay.expire();
+#endif /* USE_MQTT */
     valveRunLength.restart();
     setPumpCntrl((state.active_state == STATE_CITY) ? PUMP_OFF : PUMP_ON);
     setValve((enum PumpState)state.active_state);
@@ -1109,12 +1128,14 @@ void updateState() {
     not_idled = false;
   }
 
+#ifdef USE_MQTT
   if (valveStateFeedMaxDelay.isExpired() && valveStateFeedMinDelay.isExpired() && mqtt.connected()) {
     valveStateFeed.publish( state.active_state == STATE_CITY ? "building-o" : "w:raindrops" );
     // don't reset valveStateFeedDelay, we don't need to periodically send this.
     valveStateFeedMinDelay.restart();
     valveStateFeedMaxDelay.restart();
   }
+#endif /* USE_MQTT */
 #endif
 }
 
@@ -1409,7 +1430,7 @@ void loop() {
         mqttDelay.restart();
     }
   }
-#endif
+#endif /* USE_MQTT */
   // Update user state via buttons
   ButtonPress button_press = lastButtonPress;
   bool buttons_changed = false;
