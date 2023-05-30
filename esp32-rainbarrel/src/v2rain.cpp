@@ -1256,11 +1256,18 @@ void updateConfigDisplay() {
   display.print("*");
 
   smallface();
-  display.setCursor(0, CONFIG_TOP + (num_items+1)*CONFIG_LINEHEIGHT);
+  display.setCursor(0, CONFIG_TOP + (num_items)*CONFIG_LINEHEIGHT + 4);
   display.setTextColor(COLOR2);
   display.print("Cntrst:");
   display.print(display.getContrast());
+#ifdef RAINGAUGE_V2
+  for (int i=0; i<2; i++) {
+      display.print(" Level "); display.print(i); display.print(": ");
+      display.print(ads1115.readADC_SingleEnded(i));
+  }
+#endif
 #ifdef RAINPUMP_V2
+  lastFlowMeterReadingValid = readFlowMeter(&lastFlowMeterReading);
   display.print(" Flow:");
   if (yesterdaysFlowMeterReadingValid) {
     display.print(yesterdaysFlowMeterReading);
