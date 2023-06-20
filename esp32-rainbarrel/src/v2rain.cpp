@@ -516,6 +516,9 @@ bool readFlowMeter(uint64_t *result) {
 }
 
 void setPumpCntrl(enum PumpCntrl is_on) {
+  // if we turn pump ON and then PRESSURE_SW turns it off (ie is HIGH)
+  // less than XX seconds later, then leave pump off for YY seconds before
+  // trying to turn the pump on again. (exponential backoff on YY?)
     digitalWrite(PUMP_CNTRL, !is_on); // active low
 #ifdef USE_MOTORSHIELD
     pump->setSpeed(is_on ? 255 : 0);
@@ -1149,6 +1152,9 @@ void updateState() {
     state.active_state = state.user_state;
   } else {
     boolean is_rain_empty = !state.pipe_water_present;
+    // This can get stuck when the pipe_water_present is dry but the
+    // rain barrels have filled up again.  So we should ignore
+    // pipe_water_present if the rain barrel level is above like 33%
     if (state.connected_recently && !is_rain_empty) { // use rain barrel levels
       is_rain_empty = (state.water_level[0] <= WATER_ALARM_LOW || state.water_level[1] <= WATER_ALARM_LOW);
     }
