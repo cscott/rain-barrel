@@ -56,9 +56,6 @@
 #endif
 
 #ifdef RAINPUMP_V2
-# ifdef USE_MOTORSHIELD
-#  include <Adafruit_MotorShield.h>
-# endif
 # include "flowmeter.h"
 # include "smrtysnitch.h"
 # include "smrty_decode.h"
@@ -206,13 +203,6 @@ AsyncDelay connectionWatchdog = AsyncDelay(5*MINUTES_MS + 7, AsyncDelay::MILLIS)
 
 #ifdef RAINPUMP_V2
 // Motorshield configuration
-#ifdef USE_MOTORSHIELD
-Adafruit_MotorShield AFMS = Adafruit_MotorShield();
-Adafruit_DCMotor *cityValve = AFMS.getMotor(1);
-Adafruit_DCMotor *ground1 = AFMS.getMotor(2);
-Adafruit_DCMotor *ground2 = AFMS.getMotor(3);
-Adafruit_DCMotor *pump = AFMS.getMotor(4);
-#endif
 #ifdef USE_SNITCHMOTOR
 # define CITY_SNITCH_GPIO 1
 # define RAIN_SNITCH_GPIO 0
@@ -520,41 +510,26 @@ void setPumpCntrl(enum PumpCntrl is_on) {
   // less than XX seconds later, then leave pump off for YY seconds before
   // trying to turn the pump on again. (exponential backoff on YY?)
     digitalWrite(PUMP_CNTRL, !is_on); // active low
-#ifdef USE_MOTORSHIELD
-    pump->setSpeed(is_on ? 255 : 0);
-#endif
 }
 
 void setValve(enum PumpState state) {
     switch (state) {
     case STATE_CITY:
-#ifdef USE_MOTORSHIELD
-        cityValve->run(FORWARD);
-#endif
 #ifdef USE_SNITCHMOTOR
         setSnitchGPIO(RAIN_SNITCH_GPIO, 0);
         setSnitchGPIO(CITY_SNITCH_GPIO, 1);
 #endif
         break;
     case STATE_RAIN:
-#ifdef USE_MOTORSHIELD
-        cityValve->run(BACKWARD);
-#endif
 #ifdef USE_SNITCHMOTOR
         setSnitchGPIO(CITY_SNITCH_GPIO, 0);
         setSnitchGPIO(RAIN_SNITCH_GPIO, 1);
 #endif
         break;
     }
-#ifdef USE_MOTORSHIELD
-    cityValue->setSpeed(255);
-#endif
 }
 
 void idleValve() {
-#ifdef USE_MOTORSHIELD
-    cityValve->setSpeed(0);
-#endif
 #ifdef USE_SNITCHMOTOR
     setSnitchGPIO(CITY_SNITCH_GPIO, 0);
     setSnitchGPIO(RAIN_SNITCH_GPIO, 0);
@@ -822,16 +797,6 @@ void setup() {
     cap1298_setup();
 
 #ifdef RAINPUMP_V2
-#ifdef USE_MOTORSHIELD
-    // Motorshield Setup
-    Serial.println("Motorshield setup");
-    AFMS.begin();
-    // This should ground all outputs
-    cityValve->setSpeed(0); cityValve->run(FORWARD);
-    ground1->setSpeed(0); ground1->run(FORWARD);
-    ground2->setSpeed(0); ground2->run(FORWARD);
-    pump->setSpeed(0); pump->run(FORWARD);
-#endif
     idleValve(); // this will handle the SNITCHMOTOR case too
     setPumpCntrl(PUMP_OFF);
 #endif
