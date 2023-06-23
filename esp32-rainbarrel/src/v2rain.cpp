@@ -26,8 +26,7 @@
 
 #include <HTTPClient.h>
 #ifdef USE_MQTT
-# include <Adafruit_MQTT.h>
-# include <Adafruit_MQTT_Client.h>
+# include <ArduinoHA.h>
 #endif
 #include <ArduinoJson.h>
 #include <AsyncDelay.h>
@@ -140,55 +139,46 @@ ButtonPress lastButtonPress;
 AsyncDelay debounceDelay = AsyncDelay(250 + 1, AsyncDelay::MILLIS); // switch debounce
 AsyncDelay capReadInterval = AsyncDelay(50 + 3, AsyncDelay::MILLIS); // read @ 20Hz
 
-// WiFiClientSecure for SSL/TLS support (but this is broken!)
-WiFiClientSecure client;
+WiFiClient client; // change to WiFiClientSecure for TLS support
 #ifdef USE_MQTT
-// Setup the MQTT client class by passing in the WiFi client and MQTT server and login details
-Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
-AsyncDelay mqttDelay = AsyncDelay(15 * SECONDS_MS + 3, AsyncDelay::MILLIS); // retry every 15 seconds if not connected
+HADevice ha_device;
+HAMqtt ha_mqtt(client, ha_device, 10/*maximum entities*/);
+# define MQTT_HOST IPAddress(192,168,198,32)
+# define MQTT_USER "mqtt103"
+# define MQTT_PASS "mqtt103"
 #endif
-
-// io.adafruit.com root CA
-const char* adafruitio_root_ca = \
-    "-----BEGIN CERTIFICATE-----\n" \
-    "MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh\n" \
-    "MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\n" \
-    "d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBD\n" \
-    "QTAeFw0wNjExMTAwMDAwMDBaFw0zMTExMTAwMDAwMDBaMGExCzAJBgNVBAYTAlVT\n" \
-    "MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j\n" \
-    "b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IENBMIIBIjANBgkqhkiG\n" \
-    "9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4jvhEXLeqKTTo1eqUKKPC3eQyaKl7hLOllsB\n" \
-    "CSDMAZOnTjC3U/dDxGkAV53ijSLdhwZAAIEJzs4bg7/fzTtxRuLWZscFs3YnFo97\n" \
-    "nh6Vfe63SKMI2tavegw5BmV/Sl0fvBf4q77uKNd0f3p4mVmFaG5cIzJLv07A6Fpt\n" \
-    "43C/dxC//AH2hdmoRBBYMql1GNXRor5H4idq9Joz+EkIYIvUX7Q6hL+hqkpMfT7P\n" \
-    "T19sdl6gSzeRntwi5m3OFBqOasv+zbMUZBfHWymeMr/y7vrTC0LUq7dBMtoM1O/4\n" \
-    "gdW7jVg/tRvoSSiicNoxBN33shbyTApOB6jtSj1etX+jkMOvJwIDAQABo2MwYTAO\n" \
-    "BgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUA95QNVbR\n" \
-    "TLtm8KPiGxvDl7I90VUwHwYDVR0jBBgwFoAUA95QNVbRTLtm8KPiGxvDl7I90VUw\n" \
-    "DQYJKoZIhvcNAQEFBQADggEBAMucN6pIExIK+t1EnE9SsPTfrgT1eXkIoyQY/Esr\n" \
-    "hMAtudXH/vTBH1jLuG2cenTnmCmrEbXjcKChzUyImZOMkXDiqw8cvpOp/2PV5Adg\n" \
-    "06O/nVsJ8dWO41P0jmP6P6fbtGbfYmbW0W5BjfIttep3Sp+dWOIrWcBAI+0tKIJF\n" \
-    "PnlUkiaY4IBIqDfv8NZ5YBberOgOzW6sRBc4L0na4UU+Krk2U886UAb3LujEV0ls\n" \
-    "YSEY1QSteDwsOoBrp+uvFRTp2InBuThs4pFsiv9kuXclVzDAGySj4dzp30d8tbQk\n" \
-    "CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=\n" \
-    "-----END CERTIFICATE-----\n";
 
 /****************************** Feeds ***************************************/
 
 #ifdef USE_MQTT
-// Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
-#define FEED_PREFIX AIO_USERNAME "/feeds/rain-barrels."
+
 #ifdef RAINPUMP_V2
 // Update valve state every ~5 minutes; this is the MQTT keepalive.
 AsyncDelay valveStateFeedMaxDelay = AsyncDelay(5*MINUTES_MS - 1019, AsyncDelay::MILLIS);
 AsyncDelay valveStateFeedMinDelay = AsyncDelay(1*SECONDS_MS + 13, AsyncDelay::MILLIS); // not more than 1/second
-Adafruit_MQTT_Publish valveStateFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "water-source");
+HABinarySensor ha_valve_state_sensor("valve_state");
+HASelect ha_valve_state_select("valve_select");
+HABinarySensor ha_pipe_water_sensor("pipe_water_present");
+
+AsyncDelay flowMeterInterval = AsyncDelay(1*MINUTES_MS - 1, AsyncDelay::MILLIS);
+AsyncDelay flowMeterIntervalMax = AsyncDelay(1 * HOURS_MS - 7, AsyncDelay::MILLIS);
+HASensorNumber ha_flow_meter1("flowmeter1", HASensorNumber::PrecisionP3);
+
+HATagScanner ha_smrty_raw("smrty_raw");
+HASensorNumber ha_smrty_moisture("smrty_moisture", HASensorNumber::PrecisionP1);
+HASensorNumber ha_smrty_temperature("smrty_temp", HASensorNumber::PrecisionP1);
+
+HABinarySensor ha_pressure_sensor("pressure_sensor");
+
 #endif /* RAINPUMP_V2 */
+
 #ifdef RAINGAUGE_V2
 // 11s so they don't hit at the same time as the SMRT-Y poll, which is 9s
 AsyncDelay waterLevelFeedDelay = AsyncDelay(11*SECONDS_MS + 3, AsyncDelay::MILLIS); // every ~10s
-Adafruit_MQTT_Publish waterLevel1Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel1");
-Adafruit_MQTT_Publish waterLevel2Feed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "waterlevel2");
+HASensorNumber ha_water_level1("waterlevel1", HASensorNumber::PrecisionP1);
+HASensorNumber ha_water_level1_raw("waterlevel1_raw", HASensorNumber::PrecisionP0);
+HASensorNumber ha_water_level2("waterlevel2", HASensorNumber::PrecisionP1);
+HASensorNumber ha_water_level2_raw("waterlevel2_raw", HASensorNumber::PrecisionP0);
 #endif /* RAINGAUGE_V2 */
 #endif /* USE_MQTT */
 
@@ -218,28 +208,13 @@ AsyncDelay valveRunLength = AsyncDelay(1 * MINUTES_MS + 13, AsyncDelay::MILLIS);
 // This interval is offset just a smidge because we ideally want to bin the
 // flow per minute. But being .002% too high shouldn't matter.
 // But do try to generate at least 1 data point per day
-uint64_t lastFlowMeterReading = 0, yesterdaysFlowMeterReading = 0;
-bool lastFlowMeterReadingValid = false, yesterdaysFlowMeterReadingValid = false;
-AsyncDelay flowMeterInterval = AsyncDelay(1*MINUTES_MS - 1, AsyncDelay::MILLIS);
-AsyncDelay flowMeterIntervalMax = AsyncDelay(12 * HOURS_MS - 7, AsyncDelay::MILLIS);
-#ifdef USE_MQTT
-Adafruit_MQTT_Publish flowMeterFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "irrigation-flow");
-Adafruit_MQTT_Publish flowMeterDailyFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "daily-irrigation-flow");
-// This is actually just shy of once a day, we'll sync w/ the adafruit time
-// service to ensure it happens exactly on the first hour boundary after
-// water flows for the first time.
-AsyncDelay flowOnceADay = AsyncDelay(24 * HOURS_MS - (40 * MINUTES_MS), AsyncDelay::MILLIS);
-Adafruit_MQTT_Subscribe hourlyFeed = Adafruit_MQTT_Subscribe(&mqtt, "time/hours");
-void hourlyCallback(char *val, uint16_t len);
+uint64_t lastFlowMeterReading = 0;
+bool lastFlowMeterReadingValid = false;
 
-Adafruit_MQTT_Publish smrtyRawFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-raw");
-Adafruit_MQTT_Publish soilMoistureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-moisture");
-Adafruit_MQTT_Publish soilTemperatureFeed = Adafruit_MQTT_Publish(&mqtt, FEED_PREFIX "smrty-temperature");
 // This is polling delay; it is also minimum MQTT publish interval so we don't
 // get throttled.
 // 9s so they don't hit at the same time as the water level poll, which is 11s
 AsyncDelay smrtyInterval = AsyncDelay(9 * SECONDS_MS + 1, AsyncDelay::MILLIS);
-#endif /* USE_MQTT */
 uint8_t smrtyLastSeqno = 0xFF;
 #endif
 
@@ -309,6 +284,63 @@ SystemState last_xmit_state = state;
 
 void updateState();
 
+#if defined(USE_MQTT) && defined(RAINPUMP_V2)
+void ha_set_valve_state_sensor(bool initial = false) {
+  bool value = (state.active_state != STATE_CITY);
+  /* Can't dynamically update icon, alas. */
+#if 0
+  if (value) {
+    ha_valve_state_sensor.setIcon("mdi:weather-rainy");
+  } else {
+    ha_valve_state_sensor.setIcon("mdi:city");
+  }
+#endif
+  if (initial) {
+    ha_valve_state_sensor.setCurrentState(value);
+  } else {
+    ha_valve_state_sensor.setState(value);
+  }
+}
+
+void ha_set_valve_state_select(bool initial = false) {
+  int8_t value;
+  switch (state.user_state) {
+  case STATE_CITY:
+    value = 0;
+    break;
+  default:
+  case STATE_AUTO:
+    value = 1;
+    break;
+  case STATE_RAIN:
+    value = 2;
+    break;
+  }
+  if (initial) {
+    ha_valve_state_select.setCurrentState(value);
+  } else {
+    ha_valve_state_select.setState(value);
+  }
+}
+
+void ha_valve_state_select_command(int8_t index, HASelect *sender) {
+  switch(index) {
+  case 0:
+    state.user_state = STATE_CITY;
+    break;
+  default:
+  case 1:
+    state.user_state = STATE_AUTO;
+    break;
+  case 2:
+    state.user_state = STATE_RAIN;
+    break;
+  }
+  ha_set_valve_state_select(); // report back to HA
+  updateState(); // adjust various valves
+}
+#endif
+
 void smallface() {
   display.setFont();
   display.setTextSize(1);
@@ -351,7 +383,6 @@ void handleRoot() {
 "    <pre>%3d.%d%% %3d.%d%%</pre>\n"
 "    <p>Contacted recently by rain gauge: %s</p>\n"
 "    <p>Total flow: %.1lf gallons (raw count: %ld)</p>\n"
-"    <p>Today's flow: %.1lf gallons</p>\n"
 "    <p>Pressure Switch: %s</p>\n"
 "    <img src=\"/test.svg\" />\n"
 "  </body>\n"
@@ -367,7 +398,6 @@ void handleRoot() {
            state.connected_recently ? "Yes" : "No",
            (double) (lastFlowMeterReadingValid ? FLOW_TO_GALLONS(0, lastFlowMeterReading) : -1),
            (long) (lastFlowMeterReadingValid ? lastFlowMeterReading : -1),
-           (double) (lastFlowMeterReadingValid && yesterdaysFlowMeterReadingValid ? FLOW_TO_GALLONS(yesterdaysFlowMeterReading, lastFlowMeterReading) : -1),
            digitalRead(PRESSURE_SW) ? "OPEN" : "CLOSED"
           );
   server.send(200, "text/html", temp);
@@ -421,21 +451,9 @@ void handleTest() {
   uint8_t seqno;
   struct smrty_msg msg;
   uint8_t good_checksum;
-  bool st = 0 ? pollSmrtySnitch() :
+  bool st = 1 ? pollSmrtySnitch() :
       readSmrtySnitch(0xC0, &seqno, &msg, &good_checksum);
-#ifdef USE_MQTT
-  char mqtt_status[128] = { "CONNECTED" };
-  if (!mqtt.connected()) {
-    int ret = mqtt.connect();
-    if (ret != 0) {
-      snprintf(mqtt_status, 128, "%s", mqtt.connectErrorString(ret));
-    } else {
-      snprintf(mqtt_status, 128, "RECONNECTED");
-    }
-  }
-#else
   const char *mqtt_status = "N/A";
-#endif
   snprintf(temp, 800, "<html><body><pre>\n"
            "Return value: %s\n"
            "[%02X] %02X %02X %02X %02X | %02X %02X %02X | %02X%s\n"
@@ -601,25 +619,29 @@ void publishSmrty(uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
              msg->addr, msg->cmd, msg->tx_data1, msg->tx_data2,
              msg->rx_data1, msg->rx_data2, msg->status,
              msg->checksum, good_checksum ? "":"*");
-    smrtyRawFeed.publish(buf);
+    ha_smrty_raw.tagScanned(buf);
     if (!good_checksum) { return; }
     // Do our best to decode these values.
     uint16_t tx_data = ((uint16_t)msg->tx_data2)<<8 | msg->tx_data1;
     uint16_t rx_data = ((uint16_t)msg->rx_data2)<<8 | msg->rx_data1;
     switch (tx_data) {
     case 0x000B:
-        soilMoistureFeed.publish(((float)rx_data)/100.0);
-        break;
+      ha_smrty_moisture.setValue(static_cast<float>(
+        ((float)rx_data)/100.0
+      ));
+      break;
     case 0x0005:
-        // This could use more points to do a proper line fit
-        // (This one done at https://mycurvefit.com/)
-        soilTemperatureFeed.publish(33.1877 + (rx_data*.1089572));
-        break;
+      // This could use more points to do a proper line fit
+      // (This one done at https://mycurvefit.com/)
+      ha_smrty_temperature.setValue(static_cast<float>(
+        33.1877 + (rx_data*.1089572)
+      ));
+      break;
     case 0x000E:
-        // This is electrical conductivity, but it's always 0.0, so ignore it.
-        break;
+      // This is electrical conductivity, but it's always 0.0, so ignore it.
+      break;
     default:
-        break;
+      break;
     }
 #endif /* USE_MQTT */
 }
@@ -645,7 +667,9 @@ bool pollSmrtySnitch(void) {
     for (--i; i>=0; i--) {
         publishSmrty(read_seqno[i], &read_msgs[i], read_good_checksum[i]);
         smrtyLastSeqno = read_seqno[i];
+#if 0
         return true; // This ensures that we don't get throttled by Adafruit IO
+#endif
     }
     return true;
 }
@@ -792,6 +816,7 @@ void setup() {
     // Wifi Setup
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
+    WiFi.setSleep(false);
 
     Serial.println("cap1298 setup");
     cap1298_setup();
@@ -858,15 +883,80 @@ void setup() {
         display.display();
     }
 
-    // Set Adafruit IO's root CA
-    client.setCACert(adafruitio_root_ca);
 #ifdef USE_MQTT
+    byte mac[6];
+    WiFi.macAddress(mac);
+    ha_device.setUniqueId(mac, sizeof(mac));
+    ha_device.setSoftwareVersion("1.0.0");
+    ha_device.setManufacturer("C. Scott Ananian");
+    ha_device.enableSharedAvailability();
+    ha_device.enableLastWill();
 #ifdef RAINPUMP_V2
-    mqtt.subscribe(&hourlyFeed);
-    hourlyFeed.setCallback(hourlyCallback);
-    flowOnceADay.restart();
+    ha_device.setName("Rain Pump");
+    ha_device.setModel("Rain Pump");
+    //ha_device.setIcon("mdi:water-pump");
+
+    ha_valve_state_sensor.setName("Using Rain Water");
+    ha_valve_state_sensor.setIcon("mdi:weather-rainy");
+    ha_set_valve_state_sensor(true);
+
+    ha_valve_state_select.setName("Water Source");
+    ha_valve_state_select.setOptions("City;Auto;Rain");
+    ha_valve_state_select.setRetain(true);
+    ha_valve_state_select.onCommand(ha_valve_state_select_command);
+    ha_set_valve_state_select(true);
+
+    ha_pipe_water_sensor.setName("Pipe Water Present");
+    ha_pipe_water_sensor.setDeviceClass("moisture");
+
+    ha_flow_meter1.setName("Irrigation Flow");
+    ha_flow_meter1.setDeviceClass("water");
+    ha_flow_meter1.setUnitOfMeasurement("gal");
+    ha_flow_meter1.setStateClass("total_increasing");
+
+    ha_smrty_raw.setName("SMRTY Raw Reads");
+
+    ha_smrty_moisture.setName("Soil Moisture");
+    ha_smrty_moisture.setUnitOfMeasurement("%");
+    ha_smrty_moisture.setDeviceClass("moisture");
+    ha_smrty_moisture.setStateClass("measurement");
+
+    ha_smrty_temperature.setName("Soil Temperature");
+    ha_smrty_temperature.setUnitOfMeasurement("°F");
+    ha_smrty_temperature.setDeviceClass("temperature");
+    ha_smrty_temperature.setStateClass("measurement");
+
+    ha_pressure_sensor.setName("Pump Running");
+    ha_pressure_sensor.setDeviceClass("running");
 #endif
-    mqtt.connect();
+
+#ifdef RAINGAUGE_V2
+    ha_device.setName("Rain Gauge");
+    ha_device.setModel("Rain Gauge");
+    //ha_device.setIcon("mdi:gauge");
+    ha_water_level1.setName("Water Level Barrel 1");
+    ha_water_level2.setName("Water Level Barrel 2");
+    ha_water_level1.setDeviceClass("volume_storage");
+    ha_water_level2.setDeviceClass("volume_storage");
+    ha_water_level1.setUnitOfMeasurement("%");
+    ha_water_level2.setUnitOfMeasurement("%");
+    ha_water_level1.setIcon("mdi:gauge");
+    ha_water_level2.setIcon("mdi:gauge");
+    ha_water_level1.setStateClass("measurement");
+    ha_water_level2.setStateClass("measurement");
+    ha_water_level1_raw.setName("Water Level Barrel 1 (raw)");
+    ha_water_level2_raw.setName("Water Level Barrel 2 (raw)");
+    ha_water_level1_raw.setDeviceClass("volume_storage");
+    ha_water_level2_raw.setDeviceClass("volume_storage");
+    //ha_water_level1_raw.setUnitOfMeasurement("counts");
+    //ha_water_level2_raw.setUnitOfMeasurement("counts");
+    ha_water_level1_raw.setIcon("mdi:gauge");
+    ha_water_level2_raw.setIcon("mdi:gauge");
+    ha_water_level1_raw.setStateClass("measurement");
+    ha_water_level2_raw.setStateClass("measurement");
+#endif
+
+    ha_mqtt.begin(MQTT_HOST, MQTT_USER, MQTT_PASS);
 #endif
 
     ArduinoOTA.setHostname(MDNS_NAME);
@@ -1004,25 +1094,6 @@ void sendUpdate(int new_user_state = -1) {
 }
 #endif
 
-#if defined(USE_MQTT) && defined(RAINPUMP_V2)
-void hourlyCallback(char *val, uint16_t len) {
-  if (flowOnceADay.isExpired()) {
-    lastFlowMeterReadingValid = readFlowMeter(&lastFlowMeterReading);
-    if (lastFlowMeterReadingValid) {
-      double gallons = FLOW_TO_GALLONS(yesterdaysFlowMeterReading, lastFlowMeterReading);
-      if (mqtt.connected()) {
-        flowMeterDailyFeed.publish(gallons);
-      }
-      yesterdaysFlowMeterReading = lastFlowMeterReading;
-      yesterdaysFlowMeterReadingValid = true;
-    } else {
-      yesterdaysFlowMeterReadingValid = false;
-    }
-    flowOnceADay.restart();
-  }
-}
-#endif /* USE_MQTT && RAINPUMP_V2 */
-
 void updateState() {
 #ifdef RAINGAUGE_V2
   if (lastLevelReading.isExpired()) {
@@ -1054,11 +1125,18 @@ void updateState() {
 #endif
     }
 #ifdef USE_MQTT
-    // periodically send levels to AIO
-    if (waterLevelFeedDelay.isExpired() && mqtt.connected()) {
-      // publishing raw levels for now, for calibration purpoes
-      waterLevel1Feed.publish(raw_level[0]/*state.water_level[0]*/);
-      waterLevel2Feed.publish(raw_level[1]/*state.water_level[1]*/);
+    // periodically send levels to Home Assistant
+    if (waterLevelFeedDelay.isExpired()) {
+      // percentages
+      float percent;
+      percent = state.water_level[0] / (float)10;
+      ha_water_level1.setValue(static_cast<float>(percent));
+      percent = state.water_level[1] / (float)10;
+      ha_water_level2.setValue(static_cast<float>(percent));
+      // raw levels, for calibration purposes
+      ha_water_level1_raw.setValue(raw_level[0]);
+      ha_water_level2_raw.setValue(raw_level[1]);
+      // wait for next time
       waterLevelFeedDelay.restart();
     }
 #endif
@@ -1081,35 +1159,28 @@ void updateState() {
       lastFlowMeterReadingValid = true;
     } else {
       // don't fill the log with a lot of unnecessary zeroes
-      if (newFlow != lastFlowMeterReading || flowMeterIntervalMax.isExpired()) {
-        double gallons = FLOW_TO_GALLONS(lastFlowMeterReading, newFlow);
 #ifdef USE_MQTT
-        if (mqtt.connected()) {
-          flowMeterFeed.publish(gallons);
-        }
-        if (!yesterdaysFlowMeterReadingValid) {
-          // This is the first flow of the day since startup
-          yesterdaysFlowMeterReading = lastFlowMeterReading;
-          yesterdaysFlowMeterReadingValid = true;
-          flowOnceADay.restart(); // resync to next hour
-        }
-#endif
-        lastFlowMeterReading = newFlow;
+      if (newFlow != lastFlowMeterReading || flowMeterIntervalMax.isExpired()) {
+        double gallons = FLOW_TO_GALLONS(0, newFlow);
+        ha_flow_meter1.setValue((float)gallons);
         flowMeterIntervalMax.repeat();
+        lastFlowMeterReading = newFlow;
       }
+#endif
     }
   }
   // read the SMRTY snitch at interval
 #ifdef USE_MQTT
   if (smrtyInterval.isExpired()) {
       smrtyInterval.restart();
-      if (mqtt.connected()) {
-          pollSmrtySnitch();
-      }
+      pollSmrtySnitch();
   }
 #endif
   // read our pipe water sensor
   state.pipe_water_present = !digitalRead(WATER_SENSE);
+#ifdef USE_MQTT
+  ha_pipe_water_sensor.setState(state.pipe_water_present);
+#endif
 
   // implement "auto" mode
   if (state.user_state != STATE_AUTO) {
@@ -1149,12 +1220,13 @@ void updateState() {
   }
 
 #ifdef USE_MQTT
-  if (valveStateFeedMaxDelay.isExpired() && valveStateFeedMinDelay.isExpired() && mqtt.connected()) {
-    valveStateFeed.publish( state.active_state == STATE_CITY ? "building-o" : "w:raindrops" );
+  if (valveStateFeedMaxDelay.isExpired() && valveStateFeedMinDelay.isExpired()) {
+    ha_set_valve_state_sensor();
     // don't reset valveStateFeedDelay, we don't need to periodically send this.
     valveStateFeedMinDelay.restart();
     valveStateFeedMaxDelay.restart();
   }
+  ha_set_valve_state_select(); // update if necessary
 #endif /* USE_MQTT */
 #endif
 }
@@ -1240,12 +1312,6 @@ void updateConfigDisplay() {
 #ifdef RAINPUMP_V2
   lastFlowMeterReadingValid = readFlowMeter(&lastFlowMeterReading);
   display.print(" Flow:");
-  if (yesterdaysFlowMeterReadingValid) {
-    display.print(yesterdaysFlowMeterReading);
-  } else {
-    display.print("-");
-  }
-  display.print("=>");
   if (lastFlowMeterReadingValid) {
     display.print(lastFlowMeterReading);
   } else {
@@ -1454,15 +1520,8 @@ void loop() {
     ESP.restart();
   }
 #ifdef USE_MQTT
-  if ((!mqtt.connected()) && mqttDelay.isExpired()) {
-    int ret = mqtt.connect();
-    if (ret != 0) {
-        Serial.print("MQTT: ");
-        Serial.println(mqtt.connectErrorString(ret));
-        mqtt.disconnect();
-        mqttDelay.restart();
-    }
-  }
+  ha_pressure_sensor.setState(!digitalRead(PRESSURE_SW)); // HACK!
+  ha_mqtt.loop();
 #endif /* USE_MQTT */
   // Update user state via buttons
   ButtonPress button_press = lastButtonPress;
@@ -1497,9 +1556,6 @@ void loop() {
   if (WiFi.isConnected()) {
     connectionWatchdog.restart();
   }
-#ifdef USE_MQTT
-  mqtt.processPackets(0);
-#endif
   // Update user state via buttons
   if (displayState == DISPLAY_CONFIG) {
     if (buttons_changed || configDisplayKeyRepeat.isExpired()) {
