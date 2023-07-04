@@ -1,0 +1,3 @@
+(sym_lib_table
+  (lib (name "Digispark")(type "KiCad")(uri "${KIPRJMOD}/Digispark.kicad_sym")(options "")(descr ""))
+)

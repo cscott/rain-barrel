@@ -1,0 +1,7 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "Level_Chopper")(type "KiCad")(uri "${KIPRJMOD}/Level_Chopper.pretty")(options "")(descr ""))
+  (lib (name "885012207046")(type "KiCad")(uri "${KIPRJMOD}/885012207046.pretty")(options "")(descr ""))
+  (lib (name "ACASA100121002P100")(type "KiCad")(uri "${KIPRJMOD}/ACASA100121002P100.pretty")(options "")(descr ""))
+  (lib (name "Transflective")(type "KiCad")(uri "${KIPRJMOD}/Transflective.pretty")(options "")(descr ""))
+)

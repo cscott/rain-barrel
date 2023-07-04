@@ -1,0 +1,6 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "885012207046")(type "KiCad")(uri "${KIPRJMOD}/885012207046.kicad_sym")(options "")(descr ""))
+  (lib (name "ACASA100121002P100")(type "KiCad")(uri "${KIPRJMOD}/ACASA100121002P100.kicad_sym")(options "")(descr ""))
+  (lib (name "Transflective")(type "KiCad")(uri "${KIPRJMOD}/Transflective.kicad_sym")(options "")(descr ""))
+)

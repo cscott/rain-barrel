@@ -1,0 +1,5 @@
+(fp_lib_table
+  (lib (name "DigiSpark")(type "KiCad")(uri "${KIPRJMOD}/DigiSpark.pretty")(options "")(descr ""))
+  (lib (name "SW-Digistump")(type "KiCad")(uri "${KIPRJMOD}/SW-Digistump.pretty")(options "")(descr ""))
+  (lib (name "Transflective")(type "KiCad")(uri "/home/cananian/Projects/Electronics/RainBarrel/Transflective/Rear-Panel/Transflective.pretty")(options "")(descr ""))
+)

@@ -1,4 +1,6 @@
 (sym_lib_table
-  (lib (name MCU_RaspberryPi_and_Boards)(type Legacy)(uri "${KIPRJMOD}/../RP-Pico Libraries/MCU_RaspberryPi_and_Boards.lib")(options "")(descr ""))
-  (lib (name Transflective)(type Legacy)(uri /home/cananian/Projects/Electronics/RainBarrel/Transflective/LCD-Panel/Transflective.lib)(options "")(descr ""))
+  (version 7)
+  (lib (name "MCU_RaspberryPi_and_Boards")(type "Legacy")(uri "${KIPRJMOD}/../RP-Pico Libraries/MCU_RaspberryPi_and_Boards.lib")(options "")(descr ""))
+  (lib (name "Transflective")(type "KiCad")(uri "/home/cananian/Projects/Electronics/RainBarrel/Transflective/LCD-Panel/Transflective.kicad_sym")(options "")(descr ""))
+  (lib (name "Transflective-rescue")(type "KiCad")(uri "${KIPRJMOD}/Transflective-rescue.kicad_sym")(options "")(descr ""))
 )
