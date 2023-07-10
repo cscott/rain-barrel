@@ -1,0 +1,8 @@
+"Id";"Designator";"Footprint";"Quantity";"Designation";"Supplier and ref";
+1;"J3";"JST-SH-4-VERT-SMD";1;"STEMMA QT";;;
+2;"H2,H3,H1";"MountingHole_3.2mm_M3";3;"MountingHole";;;
+3;"U2,U1,U3";"Digispark";3;"DigiSpark";;;
+4;"RN1";"R_Array_Convex_4x1206";1;"10k";;;
+5;"J2";"JST_XH_B3B-XH-A_1x03_P2.50mm_Vertical";1;"EXISTING TURBINE";;;
+6;"J1";"JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical";1;"NEW TURBINE";;;
+7;"Q1";"SOT-363_SC-70-6_Handsoldering";1;"BSS138";;;
