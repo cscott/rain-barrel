@@ -1,0 +1,13 @@
+"Id";"Designator";"Footprint";"Quantity";"Designation";"Supplier and ref";
+1;"H1,H2";"MountingHole_3.2mm_M3";2;"MountingHole";;;
+2;"C4,C2,C3,C1";"CP_EIA-2012-15_AVX-P_Pad1.30x1.05mm_HandSolder";4;"150nF";;;
+3;"C5";"CP_EIA-2012-15_AVX-P_Pad1.30x1.05mm_HandSolder";1;"10uF";;;
+4;"RN1";"RES_ACAS_0612_VIS";1;"10R";;;
+5;"RN5,RN3,RN2,RN4";"RES_ACAS_0612_VIS";4;"1K/10k";;;
+6;"C6";"CP_EIA-2012-15_AVX-P_Pad1.30x1.05mm_HandSolder";1;".1uF";;;
+7;"U1";"SOIC-14_3.9x8.7mm_P1.27mm";1;"MCP6V54-E/SL";;;
+8;"J4";"PermaProto";1;"PermaProto";;;
+9;"J1";"JST_XH_B5B-XH-A_1x05_P2.50mm_Vertical";1;"Sensors";;;
+10;"J3";"JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical";1;"Power Input";;;
+11;"J2";"JST_XH_B5B-XH-A_1x05_P2.50mm_Vertical";1;"To ADC";;;
+12;"RN6";"RES_ACAS_0612_VIS";1;"1K";;;
