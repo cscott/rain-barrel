@@ -7,6 +7,10 @@
 #define TURBINE_PIN 5
 #define DEBOUNCE 16
 
+#ifndef FLOWMETER_OFFSET
+# error FLOWMETER_OFFSET must be defined (is this flowmeter #1, #2, or #3?)
+#endif
+
 void requestEvent();
 
 int lastLevel;
@@ -16,7 +20,7 @@ int64_t pulse_count;
 void setup() {
     pinMode(LED_PIN, OUTPUT);
     pinMode(TURBINE_PIN, INPUT);
-    Wire.begin(FLOWMETER_I2C_ADDR); // join i2c bus with address
+    Wire.begin(FLOWMETER_I2C_ADDR_BASE + FLOWMETER_OFFSET); // join i2c bus with address
     Wire.onRequest(requestEvent);   // register event
     lastLevel = digitalRead(TURBINE_PIN);
     digitalWrite(LED_PIN, lastLevel);

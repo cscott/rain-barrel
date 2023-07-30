@@ -84,6 +84,10 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
 #define FLOW_TO_GALLONS(oldFlow, newFlow) \
   ((newFlow - oldFlow) / (double)TICKS_PER_GALLON)
 
+#define NUM_FLOWMETERS 3
+#define FOREACH_FLOWMETER(x) x,x,x
+#define FOREACH_FLOWMETER_ARG(x) x(0),x(1),x(2)
+
 enum PumpCntrl { PUMP_OFF = 0, PUMP_ON = 1 };
 
 #define COLOR1 0x00 // was: EPD_WHITE
@@ -162,7 +166,11 @@ HABinarySensor ha_pipe_water_sensor("pipe_water_present");
 
 AsyncDelay flowMeterInterval = AsyncDelay(1*MINUTES_MS - 1, AsyncDelay::MILLIS);
 AsyncDelay flowMeterIntervalMax = AsyncDelay(1 * HOURS_MS - 7, AsyncDelay::MILLIS);
-HASensorNumber ha_flow_meter1("flowmeter1", HASensorNumber::PrecisionP3);
+#define FLOWMETER_SENSOR(x) \
+  HASensorNumber("flowmeter" #x, HASensorNumber::PrecisionP3)
+HASensorNumber ha_flow_meter[NUM_FLOWMETERS] = {
+  FOREACH_FLOWMETER_ARG(FLOWMETER_SENSOR)
+};
 
 HATagScanner ha_smrty_raw("smrty_raw");
 HASensorNumber ha_smrty_moisture("smrty_moisture", HASensorNumber::PrecisionP1);
@@ -208,8 +216,8 @@ AsyncDelay valveRunLength = AsyncDelay(1 * MINUTES_MS + 13, AsyncDelay::MILLIS);
 // This interval is offset just a smidge because we ideally want to bin the
 // flow per minute. But being .002% too high shouldn't matter.
 // But do try to generate at least 1 data point per day
-uint64_t lastFlowMeterReading = 0;
-bool lastFlowMeterReadingValid = false;
+uint64_t lastFlowMeterReading[] = { FOREACH_FLOWMETER(0) };
+bool lastFlowMeterReadingValid[] = { FOREACH_FLOWMETER(false) };
 
 // This is polling delay; it is also minimum MQTT publish interval so we don't
 // get throttled.
@@ -364,6 +372,16 @@ void handleRoot() {
   int min = sec / 60;
   int hr = min / 60;
 
+  // Sum flows!
+  uint64_t total_flow = 0;
+  bool saw_good_reading = false;
+  for (int i=0; i<NUM_FLOWMETERS; i++) {
+    if (lastFlowMeterReadingValid[i]) {
+      total_flow += lastFlowMeterReading[i];
+      saw_good_reading = true;
+    }
+  }
+
   snprintf(temp, 850,
 
            "<html>\n"
@@ -396,8 +414,8 @@ void handleRoot() {
            state.water_level[0]/10, state.water_level[0]%10,
            state.water_level[1]/10, state.water_level[1]%10,
            state.connected_recently ? "Yes" : "No",
-           (double) (lastFlowMeterReadingValid ? FLOW_TO_GALLONS(0, lastFlowMeterReading) : -1),
-           (long) (lastFlowMeterReadingValid ? lastFlowMeterReading : -1),
+           (double) (FLOW_TO_GALLONS(0, total_flow)),
+           (long) (saw_good_reading ? total_flow : -1),
            digitalRead(PRESSURE_SW) ? "OPEN" : "CLOSED"
           );
   server.send(200, "text/html", temp);
@@ -507,10 +525,10 @@ void drawGraph() {
   server.send(200, "image/svg+xml", out);
 }
 
-bool readFlowMeter(uint64_t *result) {
+bool readFlowMeter(uint64_t *result, uint8_t which) {
     uint64_t count = 0;
 #ifdef FLOWMETER_CONNECTED
-    uint8_t nBytes = Wire.requestFrom(FLOWMETER_I2C_ADDR, 8);
+    uint8_t nBytes = Wire.requestFrom(FLOWMETER_I2C_ADDR_BASE + which, 8);
     for (int i=0; Wire.available() > 0 && i<8; i++) {
         count |= ((uint64_t)Wire.read()) << (8*i);
     }
@@ -909,10 +927,12 @@ void setup() {
     ha_pipe_water_sensor.setName("Pipe Water Present");
     ha_pipe_water_sensor.setDeviceClass("moisture");
 
-    ha_flow_meter1.setName("Irrigation Flow");
-    ha_flow_meter1.setDeviceClass("water");
-    ha_flow_meter1.setUnitOfMeasurement("gal");
-    ha_flow_meter1.setStateClass("total_increasing");
+    for(int i=0; i<NUM_FLOWMETERS; i++) {
+      ha_flow_meter[i].setName("Irrigation Flow");
+      ha_flow_meter[i].setDeviceClass("water");
+      ha_flow_meter[i].setUnitOfMeasurement("gal");
+      ha_flow_meter[i].setStateClass("total_increasing");
+    }
 
     ha_smrty_raw.setName("SMRTY Raw Reads");
 
@@ -1037,7 +1057,9 @@ void setup() {
     MDNS.addService("http", "tcp", SERVER_PORT);
     Serial.println("HTTP server started");
     valveRunLength.restart(); // run the valve to move it
-    lastFlowMeterReadingValid = readFlowMeter(&lastFlowMeterReading);
+    for (int i=0; i<NUM_FLOWMETERS; i++) {
+      lastFlowMeterReadingValid[i] = readFlowMeter(&(lastFlowMeterReading[i]), i);
+    }
     flowMeterInterval.restart(); // next read the flow meter in a minute
     flowMeterIntervalMax.expire(); // report the first reading regardless
 #endif
@@ -1150,21 +1172,31 @@ void updateState() {
   // read flow meter at intervals
   if (flowMeterInterval.isExpired()) {
     flowMeterInterval.repeat();
-    uint64_t newFlow;
-    bool valid = readFlowMeter(&newFlow);
-    if (!valid) {
-      lastFlowMeterReadingValid = false;
-    } else if (!lastFlowMeterReadingValid) {
-      lastFlowMeterReading = newFlow;
-      lastFlowMeterReadingValid = true;
-    } else {
-      // don't fill the log with a lot of unnecessary zeroes
+    bool force_update = false;
+    if (flowMeterIntervalMax.isExpired()) {
+      force_update = true;
+      flowMeterIntervalMax.repeat();
+    }
+    for (int i=0; i<NUM_FLOWMETERS; i++) {
+      uint64_t newFlow;
+      bool valid = readFlowMeter(&newFlow, i);
+      bool should_update = force_update;
+      if (!valid) {
+        lastFlowMeterReadingValid[i] = false;
+        should_update = false;
+      } else if (!lastFlowMeterReadingValid[i]) {
+        lastFlowMeterReading[i] = newFlow;
+        lastFlowMeterReadingValid[i] = true;
+        should_update = true;
+      } else if (newFlow != lastFlowMeterReading[i]) {
+        // don't fill the log with a lot of unnecessary zeroes
+        lastFlowMeterReading[i] = newFlow;
+        should_update = true;
+      }
 #ifdef USE_MQTT
-      if (newFlow != lastFlowMeterReading || flowMeterIntervalMax.isExpired()) {
+      if (should_update) {
         double gallons = FLOW_TO_GALLONS(0, newFlow);
-        ha_flow_meter1.setValue((float)gallons);
-        flowMeterIntervalMax.repeat();
-        lastFlowMeterReading = newFlow;
+        ha_flow_meter[i].setValue((float)gallons);
       }
 #endif
     }
@@ -1310,10 +1342,18 @@ void updateConfigDisplay() {
   }
 #endif
 #ifdef RAINPUMP_V2
-  lastFlowMeterReadingValid = readFlowMeter(&lastFlowMeterReading);
   display.print(" Flow:");
-  if (lastFlowMeterReadingValid) {
-    display.print(lastFlowMeterReading);
+  uint64_t total_flow = 0;
+  bool saw_good_reading = false;
+  for (int i=0; i<NUM_FLOWMETERS; i++) {
+    lastFlowMeterReadingValid[i] = readFlowMeter(&(lastFlowMeterReading[i]), i);
+    if (lastFlowMeterReadingValid[i]) {
+      total_flow += lastFlowMeterReading[i];
+      saw_good_reading = true;
+    }
+  }
+  if (saw_good_reading) {
+    display.print(total_flow);
   } else {
     display.print("-");
   }

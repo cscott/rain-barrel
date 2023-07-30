@@ -239,7 +239,11 @@ void loop() {
     }
     updateDisplay(buf, goodComm);
 #else
-    Wire.requestFrom(FLOWMETER_I2C_ADDR, 8);
+# ifndef FLOWMETER_OFFSET
+# error FLOWMETER_OFFSET must be defined (is this testing flowmeter #1, #2, or #3?)
+#endif
+
+    Wire.requestFrom(FLOWMETER_I2C_ADDR_BASE + FLOWMETER_OFFSET, 8);
     uint64_t count = 0;
     for (int i=0; Wire.available(); i++) {
         count |= ((uint64_t)Wire.read()) << (8*i);
