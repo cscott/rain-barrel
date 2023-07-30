@@ -1520,7 +1520,11 @@ void loop() {
     ESP.restart();
   }
 #ifdef USE_MQTT
-  ha_pressure_sensor.setState(!digitalRead(PRESSURE_SW)); // HACK!
+#ifdef RAINPUMP_V2
+  // Hack in ha_pressure_sensor reading, which doesn't have a
+  // proper polling loop
+  ha_pressure_sensor.setState(!digitalRead(PRESSURE_SW));
+#endif
   ha_mqtt.loop();
 #endif /* USE_MQTT */
   // Update user state via buttons
