@@ -16,5 +16,8 @@ For the SMRT-Y decoder test:
  pio run -e native
  .pio/build/native/program test/test_desktop/sample-20210706.h
 
-(The `sample-input.txt` file was created from the Saleae CSV export of the
+(The `sample-*.h` file was created from the Saleae CSV export of the
 comparator channel with the `boildown.py` script.)
+
+You can also run a unit test:
+  pio test -e native

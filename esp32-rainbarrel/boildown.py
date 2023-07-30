@@ -45,6 +45,9 @@ thresholdValue = None
 thresholdValueLow = 1.0 # should be 0.8
 thresholdValueHigh = 2.0
 
+filename='../snitch-capture-20230729-export/digital.csv'
+thresholdValue = 0.5
+
 frequency = 19200 * 256
 
 maxValue = -1000

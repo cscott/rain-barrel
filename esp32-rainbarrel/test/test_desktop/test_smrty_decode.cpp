@@ -38,6 +38,11 @@ uint32_t data_20210711b[] = {
 WATCHDOG_VALUE
 };
 
+uint32_t data_20230729[] = {
+#include "sample-20230729.h"
+WATCHDOG_VALUE
+};
+
 // Moisture level decoded data: (just divide by 100!)
 // 0E0F  35.9  dec 3599
 // 0EE0  38.0      3808
@@ -62,6 +67,25 @@ struct smrty_msg *run_test(uint32_t **data) {
     } while (msg==NULL);
     return msg;
 }
+
+struct smrty_msg *run_test_ignore_zeros(uint32_t **data) {
+  // The decoder sometimes returns an all-zero packet from
+  // the new SMRT-Y hardware.  Surprising that the checksum passes...
+  struct smrty_msg *msg;
+  bool all_zeros;
+  do {
+    msg = run_test(data);
+    all_zeros = true;
+    for (int i=0; i<8; i++) {
+      if (((uint8_t*)msg)[i] != 0) {
+        all_zeros = false;
+        break;
+      }
+    }
+  } while (all_zeros);
+  return msg;
+}
+
 
 // helper for the "wake up" message
 void assert_is_wakeup(struct smrty_msg *msg) {
@@ -174,6 +198,17 @@ void test_20210711b(void) {
     // 68.9 degrees: 0x148 (ie 05 00 48 01)
 }
 
+void test_20230729(void) {
+    uint32_t *ptr = data_20230729;
+    // Wake up, three times
+    assert_is_wakeup(run_test_ignore_zeros(&ptr));
+    assert_is_wakeup(run_test_ignore_zeros(&ptr));
+    assert_is_wakeup(run_test_ignore_zeros(&ptr));
+    assert_is_report(run_test_ignore_zeros(&ptr), 0x0B, 0x00, 0x03, 0x10);
+    assert_is_report(run_test_ignore_zeros(&ptr), 0x05, 0x00, 0x7E, 0x01);
+    assert_is_report(run_test_ignore_zeros(&ptr), 0x0E, 0x00, 0x00, 0x00);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_struct_is_packed);
@@ -184,6 +219,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_20210709a3);
     RUN_TEST(test_20210710);
     RUN_TEST(test_20210711b);
+    RUN_TEST(test_20230729);
     UNITY_END();
 
     return 0;
