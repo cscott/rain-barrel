@@ -1,0 +1,21 @@
+I2C addresses used:
+
+Flowmeter 1:  0x08
+Flowmeter 2:  0x09
+Flowmeter 3:  0x0A
+
+LIS3DH:       0x19 (present on old magtag)
+
+Snitch 1:     0x24
+Snitch 2:     0x25
+
+CAP1298:      0x28 (v2 touch sensor)
+
+ADP1650:      0x30 (LCD backlight)
+
+OLED featherwing: 0x3C (SH110x for flowtester)
+
+ADS1115:      0x48 (raingauge level sensor)
+MPR121:       0x5A (old cap sensor)
+Motor Shield: 0x60 (selectable up to 0x6F)
+ST7529:       *SPI* (transflective LCD)
