@@ -11,6 +11,10 @@
 //#define USE_MUTEX
 //#define LED_SHOW_WATCHDOG
 
+#ifndef SNITCH_OFFSET
+# error SNITCH_OFFSET must be defined (is this snitch #1 or #2?)
+#endif
+
 // safety first
 #ifdef EARLEPHILHOWER
 # define WireX Wire1
@@ -119,7 +123,7 @@ void setup() {
   WireX.setSDA(GPIO_SDA0); // earlephilhower port only
   WireX.setSCL(GPIO_SCL0); // earlephilhower port only
 #endif
-  WireX.begin(SNITCH_I2C_ADDR); // join i2c bus with address
+  WireX.begin(SNITCH_I2C_ADDR_BASE + SNITCH_OFFSET); // join i2c bus with address
   WireX.onReceive(receiveEvent); // register event (bytes from master)
   WireX.onRequest(requestEvent); // register event (bytes to master)
 #ifndef DEBUGGING

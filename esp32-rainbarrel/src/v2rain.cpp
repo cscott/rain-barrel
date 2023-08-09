@@ -94,6 +94,11 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
 #define FOREACH_BARREL_ARG(x) x(0) x(1) x(2)
 #define FOREACH_BARREL_ARG2(x) x(0,1) x(1,2) x(2,3)
 
+#define NUM_SNITCHES 2
+#define FOREACH_SNITCH(x) x x
+#define FOREACH_SNITCH_ARG(x) x(0) x(1)
+#define FOREACH_SNITCH_ARG2(x) x(0,1) x(1,2)
+
 #define COMMA ,
 
 enum PumpCntrl { PUMP_OFF = 0, PUMP_ON = 1 };
@@ -180,9 +185,21 @@ HASensorNumber ha_flow_meter[NUM_FLOWMETERS] = {
   FOREACH_FLOWMETER_ARG2(FLOWMETER_SENSOR)
 };
 
-HATagScanner ha_smrty_raw("smrty_raw");
-HASensorNumber ha_smrty_moisture("smrty_moisture", HASensorNumber::PrecisionP1);
-HASensorNumber ha_smrty_temperature("smrty_temp", HASensorNumber::PrecisionP1);
+#define SMRTY_SENSOR_RAW(x,y)                   \
+  HATagScanner("smrty_raw_" #y),
+HATagScanner ha_smrty_raw[NUM_SNITCHES] = {
+  FOREACH_SNITCH_ARG2(SMRTY_SENSOR_RAW)
+};
+#define SMRTY_SENSOR_MOISTURE(x,y)                                      \
+  HASensorNumber("smrty_moisture_" #y, HASensorNumber::PrecisionP1),
+HASensorNumber ha_smrty_moisture[NUM_SNITCHES] = {
+  FOREACH_SNITCH_ARG2(SMRTY_SENSOR_MOISTURE)
+};
+#define SMRTY_SENSOR_TEMPERATURE(x,y)                                   \
+  HASensorNumber("smrty_temp_" #y, HASensorNumber::PrecisionP1),
+HASensorNumber ha_smrty_temperature[NUM_SNITCHES] = {
+  FOREACH_SNITCH_ARG2(SMRTY_SENSOR_TEMPERATURE)
+};
 
 HABinarySensor ha_pressure_sensor("pressure_sensor");
 
@@ -237,7 +254,7 @@ bool lastFlowMeterReadingValid[] = { FOREACH_FLOWMETER(false COMMA) };
 // get throttled.
 // 9s so they don't hit at the same time as the water level poll, which is 11s
 AsyncDelay smrtyInterval = AsyncDelay(9 * SECONDS_MS + 1, AsyncDelay::MILLIS);
-uint8_t smrtyLastSeqno = 0xFF;
+uint8_t smrtyLastSeqno[NUM_SNITCHES] = { FOREACH_SNITCH(0xFF COMMA) };
 #endif
 
 #ifdef RAINGAUGE_V2
@@ -475,33 +492,33 @@ void handleUpdate() {
   server.send(200, "text/json", out);
 }
 
-bool readSmrtySnitch(uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8_t *good_checksum);
-bool pollSmrtySnitch();
+bool readSmrtySnitch(uint8_t snitchId, uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8_t *good_checksum);
+bool pollSmrtySnitch(uint8_t snitchId);
 
 void handleTest() {
   char temp[800];
+  uint8_t snitchId = 0;
   for (uint8_t i = 0; i < server.args(); i++) {
-    if (server.argName(i) == "level1") {
+    if (server.argName(i) == "id") {
+      snitchId = (uint8_t) server.arg(i).toInt();
     }
   }
   uint8_t seqno;
   struct smrty_msg msg;
   uint8_t good_checksum;
-  bool st = 1 ? pollSmrtySnitch() :
-      readSmrtySnitch(0xC0, &seqno, &msg, &good_checksum);
-  const char *mqtt_status = "N/A";
-  snprintf(temp, 800, "<html><body><pre>\n"
+  bool st = 1 ? pollSmrtySnitch(snitchId) :
+    readSmrtySnitch(snitchId, 0xC0, &seqno, &msg, &good_checksum);
+  snprintf(temp, 800, "<html><body>Snitch %d:<pre>\n"
            "Return value: %s\n"
            "[%02X] %02X %02X %02X %02X | %02X %02X %02X | %02X%s\n"
            "</pre>"
-           "<p>MQTT: %s</p>"
            "</body></html>",
+           (int) snitchId,
            st ? "true" : "false",
            (int)seqno,
            msg.addr, msg.cmd, msg.tx_data1, msg.tx_data2,
            msg.rx_data1, msg.rx_data2, msg.status,
-           msg.checksum, good_checksum ? "":"*",
-           mqtt_status
+           msg.checksum, good_checksum ? "":"*"
            );
   // Output
   server.send(200, "text/html", temp);
@@ -590,8 +607,8 @@ void idleValve() {
 #endif
 }
 
-bool readSmrtySnitch(uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8_t *good_checksum) {
-    Wire.beginTransmission(SNITCH_I2C_ADDR);
+bool readSmrtySnitch(uint8_t snitchId, uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8_t *good_checksum) {
+    Wire.beginTransmission(SNITCH_I2C_ADDR_BASE + snitchId);
     Wire.write(which);
     uint8_t status = Wire.endTransmission();
     uint8_t tries = 0;
@@ -606,7 +623,7 @@ bool readSmrtySnitch(uint8_t which, uint8_t *seqno, struct smrty_msg *msg, uint8
         }                                               \
     } while (false)
     while (true) {
-        nBytes = Wire.requestFrom(SNITCH_I2C_ADDR, 10);
+        nBytes = Wire.requestFrom(SNITCH_I2C_ADDR_BASE + snitchId, 10);
         if (nBytes == 0) {
             return false; /* unexpected! */
         }
@@ -644,10 +661,11 @@ bool setSnitchGPIO(uint8_t which, uint8_t level) {
     struct smrty_msg msg;
     uint8_t good_checksum;
     uint8_t cmd = (0xC0) | ((which & 0x1F) << 1) | (level & 1);
-    return readSmrtySnitch(cmd, &seqno, &msg, &good_checksum);
+    // The Snitch GPIO is always on the first snitch (snitchId = 0)
+    return readSmrtySnitch(0, cmd, &seqno, &msg, &good_checksum);
 }
 
-void publishSmrty(uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
+void publishSmrty(uint8_t snitchId, uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
 #ifdef USE_MQTT
     const char *fmt = "[%02X] %02X %02X %02X %02X | %02X %02X %02X | %02X%s";
     char buf[strlen(fmt)+1]; // string will be shorter than this
@@ -655,21 +673,21 @@ void publishSmrty(uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
              msg->addr, msg->cmd, msg->tx_data1, msg->tx_data2,
              msg->rx_data1, msg->rx_data2, msg->status,
              msg->checksum, good_checksum ? "":"*");
-    ha_smrty_raw.tagScanned(buf);
+    ha_smrty_raw[snitchId].tagScanned(buf);
     if (!good_checksum) { return; }
     // Do our best to decode these values.
     uint16_t tx_data = ((uint16_t)msg->tx_data2)<<8 | msg->tx_data1;
     uint16_t rx_data = ((uint16_t)msg->rx_data2)<<8 | msg->rx_data1;
     switch (tx_data) {
     case 0x000B:
-      ha_smrty_moisture.setValue(static_cast<float>(
+      ha_smrty_moisture[snitchId].setValue(static_cast<float>(
         ((float)rx_data)/100.0
       ));
       break;
     case 0x0005:
       // This could use more points to do a proper line fit
       // (This one done at https://mycurvefit.com/)
-      ha_smrty_temperature.setValue(static_cast<float>(
+      ha_smrty_temperature[snitchId].setValue(static_cast<float>(
         33.1877 + (rx_data*.1089572)
       ));
       break;
@@ -682,27 +700,27 @@ void publishSmrty(uint8_t seqno, struct smrty_msg *msg, bool good_checksum) {
 #endif /* USE_MQTT */
 }
 
-bool pollSmrtySnitch(void) {
+bool pollSmrtySnitch(uint8_t snitchId) {
     struct smrty_msg read_msgs[SNITCH_BUFFER_SIZE];
     uint8_t read_seqno[SNITCH_BUFFER_SIZE];
     uint8_t read_good_checksum[SNITCH_BUFFER_SIZE];
     bool status;
     int i;
     for (i=0; i<SNITCH_BUFFER_SIZE; i++) {
-        status = readSmrtySnitch(i, &read_seqno[i], &read_msgs[i], &read_good_checksum[i]);
+        status = readSmrtySnitch(snitchId, i, &read_seqno[i], &read_msgs[i], &read_good_checksum[i]);
         if (!status) {
             return false; // communications error, bail.
         }
         if (read_seqno[i] == 0xFF /* uninitialized */ ||
-            read_seqno[i] == smrtyLastSeqno) {
+            read_seqno[i] == smrtyLastSeqno[snitchId]) {
             // we found one we already transmitted, don't need to fetch more
             break;
         }
     }
     // ok, transmit up to item i.
     for (--i; i>=0; i--) {
-        publishSmrty(read_seqno[i], &read_msgs[i], read_good_checksum[i]);
-        smrtyLastSeqno = read_seqno[i];
+        publishSmrty(snitchId, read_seqno[i], &read_msgs[i], read_good_checksum[i]);
+        smrtyLastSeqno[snitchId] = read_seqno[i];
 #if 0
         return true; // This ensures that we don't get throttled by Adafruit IO
 #endif
@@ -955,17 +973,21 @@ void setup() {
       ha_flow_meter[i].setStateClass("total_increasing");
     }
 
-    ha_smrty_raw.setName("SMRTY Raw Reads");
+#define SNITCH_NAME(i,j)\
+    ha_smrty_raw[i].setName("SMRTY Raw Reads " #j);\
+    ha_smrty_moisture[i].setName("Soil Moisture " #j);\
+    ha_smrty_temperature[i].setName("Soil Temperature " #j);
+    FOREACH_SNITCH_ARG2(SNITCH_NAME);
 
-    ha_smrty_moisture.setName("Soil Moisture");
-    ha_smrty_moisture.setUnitOfMeasurement("%");
-    ha_smrty_moisture.setDeviceClass("moisture");
-    ha_smrty_moisture.setStateClass("measurement");
+    for (int i=0; i<NUM_SNITCHES; i++) {
+      ha_smrty_moisture[i].setUnitOfMeasurement("%");
+      ha_smrty_moisture[i].setDeviceClass("moisture");
+      ha_smrty_moisture[i].setStateClass("measurement");
 
-    ha_smrty_temperature.setName("Soil Temperature");
-    ha_smrty_temperature.setUnitOfMeasurement("°F");
-    ha_smrty_temperature.setDeviceClass("temperature");
-    ha_smrty_temperature.setStateClass("measurement");
+      ha_smrty_temperature[i].setUnitOfMeasurement("°F");
+      ha_smrty_temperature[i].setDeviceClass("temperature");
+      ha_smrty_temperature[i].setStateClass("measurement");
+    }
 
     ha_pressure_sensor.setName("Pump Running");
     ha_pressure_sensor.setDeviceClass("running");
@@ -1220,7 +1242,9 @@ void updateState() {
 #ifdef USE_MQTT
   if (smrtyInterval.isExpired()) {
       smrtyInterval.restart();
-      pollSmrtySnitch();
+      for (int i=0; i<NUM_SNITCHES; i++) {
+        pollSmrtySnitch(i);
+      }
   }
 #endif
   // read our pipe water sensor
@@ -1379,8 +1403,10 @@ void updateConfigDisplay() {
   display.print(" Press:");
   display.print(digitalRead(PRESSURE_SW)?"OP":"CL");
   display.print(" SMRTY:");
-  snprintf(buf, 10, "%02X", smrtyLastSeqno);
-  display.print(buf);
+  for (int i=0; i<NUM_SNITCHES; i++) {
+    snprintf(buf, 10, "%02X ", smrtyLastSeqno[i]);
+    display.print(buf);
+  }
 #endif
 }
 

@@ -215,12 +215,15 @@ void loop() {
     updateDelay.restart();
 
 #ifdef SNITCH_TESTER
+# ifndef SNITCH_OFFSET
+#  error SNITCH_OFFSET must be defined (is this testing snitch #1 or #2?)
+# endif
     uint8_t buf[9*3];
     uint8_t status;
     bool goodComm = true;
     memset(buf, 0xFF, sizeof(buf));
     for (uint8_t i=0; i<3; i++) {
-        Wire.beginTransmission(SNITCH_I2C_ADDR);
+        Wire.beginTransmission(SNITCH_I2C_ADDR_BASE + SNITCH_OFFSET);
         Wire.write(i);
         status = Wire.endTransmission();
         if (status != 0) {
@@ -229,7 +232,7 @@ void loop() {
         }
         uint8_t reg, nBytes;
         do {
-            nBytes = Wire.requestFrom(SNITCH_I2C_ADDR, 10);
+            nBytes = Wire.requestFrom(SNITCH_I2C_ADDR_BASE + SNITCH_OFFSET, 10);
             if (nBytes == 0) { goodComm = false; break; /* unexpected! */ }
             reg = Wire.read();
         } while (reg != i);  // busy loop until reg. write is done
@@ -240,8 +243,8 @@ void loop() {
     updateDisplay(buf, goodComm);
 #else
 # ifndef FLOWMETER_OFFSET
-# error FLOWMETER_OFFSET must be defined (is this testing flowmeter #1, #2, or #3?)
-#endif
+#  error FLOWMETER_OFFSET must be defined (is this testing flowmeter #1, #2, or #3?)
+# endif
 
     Wire.requestFrom(FLOWMETER_I2C_ADDR_BASE + FLOWMETER_OFFSET, 8);
     uint64_t count = 0;

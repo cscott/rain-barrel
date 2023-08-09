@@ -32,8 +32,8 @@
 #include "config.h"
 #define MDNS_NAME "flowtester" // keep same name as flowtester
 
-#include "flowmeter.h" // I2C 0x08 (not connected)
-#include "smrtysnitch.h" // I2C 0x24
+#include "flowmeter.h" // I2C 0x08 - 0x0A (not connected)
+#include "smrtysnitch.h" // I2C 0x24 - 0x25
 #include "cap1298.h"   // I2C 0x28
 #include "adp1650.h"   // I2C 0x30 (not found :( )
 //#include <Adafruit_MotorShield.h> // I2C 0x60
@@ -311,8 +311,10 @@ void updateDisplay(bool blink) {
   }
 
   // Test snitch
-  display.print("Snitch: ");
-  Wire.beginTransmission(SNITCH_I2C_ADDR);
+  display.print("Snitch ");
+  display.print(SNITCH_OFFSET + 1);
+  display.print(": ");
+  Wire.beginTransmission(SNITCH_I2C_ADDR_BASE + SNITCH_OFFSET);
   Wire.write(0);
   status = Wire.endTransmission();
   if (status != 0) {
