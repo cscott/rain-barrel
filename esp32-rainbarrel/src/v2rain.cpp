@@ -85,8 +85,11 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
   ((newFlow - oldFlow) / (double)TICKS_PER_GALLON)
 
 #define NUM_FLOWMETERS 3
-#define FOREACH_FLOWMETER(x) x,x,x
+#define FOREACH_FLOWMETER(x) x x x
 #define FOREACH_FLOWMETER_ARG(x) x(0) x(1) x(2)
+#define FOREACH_FLOWMETER_ARG2(x) x(0,1) x(1,2) x(2,3)
+
+#define COMMA ,
 
 enum PumpCntrl { PUMP_OFF = 0, PUMP_ON = 1 };
 
@@ -166,10 +169,10 @@ HABinarySensor ha_pipe_water_sensor("pipe_water_present");
 
 AsyncDelay flowMeterInterval = AsyncDelay(1*MINUTES_MS - 1, AsyncDelay::MILLIS);
 AsyncDelay flowMeterIntervalMax = AsyncDelay(1 * HOURS_MS - 7, AsyncDelay::MILLIS);
-#define FLOWMETER_SENSOR(x) \
-  HASensorNumber("flowmeter" #x, HASensorNumber::PrecisionP3),
+#define FLOWMETER_SENSOR(x,y)                                    \
+  HASensorNumber("flowmeter" #y, HASensorNumber::PrecisionP3),
 HASensorNumber ha_flow_meter[NUM_FLOWMETERS] = {
-  FOREACH_FLOWMETER_ARG(FLOWMETER_SENSOR)
+  FOREACH_FLOWMETER_ARG2(FLOWMETER_SENSOR)
 };
 
 HATagScanner ha_smrty_raw("smrty_raw");
@@ -216,8 +219,8 @@ AsyncDelay valveRunLength = AsyncDelay(1 * MINUTES_MS + 13, AsyncDelay::MILLIS);
 // This interval is offset just a smidge because we ideally want to bin the
 // flow per minute. But being .002% too high shouldn't matter.
 // But do try to generate at least 1 data point per day
-uint64_t lastFlowMeterReading[] = { FOREACH_FLOWMETER(0) };
-bool lastFlowMeterReadingValid[] = { FOREACH_FLOWMETER(false) };
+uint64_t lastFlowMeterReading[] = { FOREACH_FLOWMETER(0 COMMA) };
+bool lastFlowMeterReadingValid[] = { FOREACH_FLOWMETER(false COMMA) };
 
 // This is polling delay; it is also minimum MQTT publish interval so we don't
 // get throttled.
@@ -927,9 +930,9 @@ void setup() {
     ha_pipe_water_sensor.setName("Pipe Water Present");
     ha_pipe_water_sensor.setDeviceClass("moisture");
 
-#define FLOWMETER_NAME(i) \
-    ha_flow_meter[i].setName("Irrigation Flow " #i);
-    FOREACH_FLOWMETER_ARG(FLOWMETER_NAME);
+#define FLOWMETER_NAME(i,j)                              \
+    ha_flow_meter[i].setName("Irrigation Flow " #j);
+    FOREACH_FLOWMETER_ARG2(FLOWMETER_NAME);
 
     for(int i=0; i<NUM_FLOWMETERS; i++) {
       ha_flow_meter[i].setDeviceClass("water");
