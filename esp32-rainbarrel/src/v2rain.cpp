@@ -175,7 +175,7 @@ HABinarySensor ha_pipe_water_sensor("pipe_water_present");
 AsyncDelay flowMeterInterval = AsyncDelay(1*MINUTES_MS - 1, AsyncDelay::MILLIS);
 AsyncDelay flowMeterIntervalMax = AsyncDelay(1 * HOURS_MS - 7, AsyncDelay::MILLIS);
 #define FLOWMETER_SENSOR(x,y)                                    \
-  HASensorNumber("flowmeter" #y, HASensorNumber::PrecisionP3),
+  HASensorNumber("flowmeter_" #y, HASensorNumber::PrecisionP3),
 HASensorNumber ha_flow_meter[NUM_FLOWMETERS] = {
   FOREACH_FLOWMETER_ARG2(FLOWMETER_SENSOR)
 };
@@ -192,9 +192,9 @@ HABinarySensor ha_pressure_sensor("pressure_sensor");
 // 11s so they don't hit at the same time as the SMRT-Y poll, which is 9s
 AsyncDelay waterLevelFeedDelay = AsyncDelay(11*SECONDS_MS + 3, AsyncDelay::MILLIS); // every ~10s
 #define BARREL_SENSOR(x,y)                                       \
-  HASensorNumber("waterlevel" #y, HASensorNumber::PrecisionP1),
+  HASensorNumber("waterlevel_" #y, HASensorNumber::PrecisionP1),
 #define BARREL_SENSOR_RAW(x,y)                                           \
-  HASensorNumber("waterlevel" #y "_raw", HASensorNumber::PrecisionP0),
+  HASensorNumber("waterlevel_raw_" #y, HASensorNumber::PrecisionP0),
 HASensorNumber ha_water_level[NUM_BARRELS] = {
   FOREACH_BARREL_ARG2(BARREL_SENSOR)
 };
