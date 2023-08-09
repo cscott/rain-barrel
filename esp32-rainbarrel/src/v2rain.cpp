@@ -86,7 +86,7 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
 
 #define NUM_FLOWMETERS 3
 #define FOREACH_FLOWMETER(x) x,x,x
-#define FOREACH_FLOWMETER_ARG(x) x(0),x(1),x(2)
+#define FOREACH_FLOWMETER_ARG(x) x(0) x(1) x(2)
 
 enum PumpCntrl { PUMP_OFF = 0, PUMP_ON = 1 };
 
@@ -167,7 +167,7 @@ HABinarySensor ha_pipe_water_sensor("pipe_water_present");
 AsyncDelay flowMeterInterval = AsyncDelay(1*MINUTES_MS - 1, AsyncDelay::MILLIS);
 AsyncDelay flowMeterIntervalMax = AsyncDelay(1 * HOURS_MS - 7, AsyncDelay::MILLIS);
 #define FLOWMETER_SENSOR(x) \
-  HASensorNumber("flowmeter" #x, HASensorNumber::PrecisionP3)
+  HASensorNumber("flowmeter" #x, HASensorNumber::PrecisionP3),
 HASensorNumber ha_flow_meter[NUM_FLOWMETERS] = {
   FOREACH_FLOWMETER_ARG(FLOWMETER_SENSOR)
 };
@@ -927,8 +927,11 @@ void setup() {
     ha_pipe_water_sensor.setName("Pipe Water Present");
     ha_pipe_water_sensor.setDeviceClass("moisture");
 
+#define FLOWMETER_NAME(i) \
+    ha_flow_meter[i].setName("Irrigation Flow " #i);
+    FOREACH_FLOWMETER_ARG(FLOWMETER_NAME);
+
     for(int i=0; i<NUM_FLOWMETERS; i++) {
-      ha_flow_meter[i].setName("Irrigation Flow");
       ha_flow_meter[i].setDeviceClass("water");
       ha_flow_meter[i].setUnitOfMeasurement("gal");
       ha_flow_meter[i].setStateClass("total_increasing");
