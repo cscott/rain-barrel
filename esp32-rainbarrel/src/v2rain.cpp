@@ -89,6 +89,11 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
 #define FOREACH_FLOWMETER_ARG(x) x(0) x(1) x(2)
 #define FOREACH_FLOWMETER_ARG2(x) x(0,1) x(1,2) x(2,3)
 
+#define NUM_BARRELS 3
+#define FOREACH_BARREL(x) x x x
+#define FOREACH_BARREL_ARG(x) x(0) x(1) x(2)
+#define FOREACH_BARREL_ARG2(x) x(0,1) x(1,2) x(2,3)
+
 #define COMMA ,
 
 enum PumpCntrl { PUMP_OFF = 0, PUMP_ON = 1 };
@@ -186,10 +191,16 @@ HABinarySensor ha_pressure_sensor("pressure_sensor");
 #ifdef RAINGAUGE_V2
 // 11s so they don't hit at the same time as the SMRT-Y poll, which is 9s
 AsyncDelay waterLevelFeedDelay = AsyncDelay(11*SECONDS_MS + 3, AsyncDelay::MILLIS); // every ~10s
-HASensorNumber ha_water_level1("waterlevel1", HASensorNumber::PrecisionP1);
-HASensorNumber ha_water_level1_raw("waterlevel1_raw", HASensorNumber::PrecisionP0);
-HASensorNumber ha_water_level2("waterlevel2", HASensorNumber::PrecisionP1);
-HASensorNumber ha_water_level2_raw("waterlevel2_raw", HASensorNumber::PrecisionP0);
+#define BARREL_SENSOR(x,y)                                       \
+  HASensorNumber("waterlevel" #y, HASensorNumber::PrecisionP1),
+#define BARREL_SENSOR_RAW(x,y)                                           \
+  HASensorNumber("waterlevel" #y "_raw", HASensorNumber::PrecisionP0),
+HASensorNumber ha_water_level[NUM_BARRELS] = {
+  FOREACH_BARREL_ARG2(BARREL_SENSOR)
+};
+HASensorNumber ha_water_level_raw[NUM_BARRELS] = {
+  FOREACH_BARREL_ARG2(BARREL_SENSOR_RAW)
+};
 #endif /* RAINGAUGE_V2 */
 #endif /* USE_MQTT */
 
@@ -241,7 +252,7 @@ String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 // side instead of the digital side... (we tried!)
 // Actually - one of our sensors is much noisier than the other! HW issue?
 #define LEVEL_SAMPLE_FILTER 4
-int32_t level_accum[2] = { 0, 0 };
+int32_t level_accum[NUM_BARRELS] = { FOREACH_BARREL(0 COMMA) };
 #endif
 
 enum PumpState {
@@ -255,7 +266,7 @@ typedef struct SystemState {
   int active_state; // Running state (ie, not 'auto')
   boolean connected_recently;
   boolean pipe_water_present;
-  int water_level[2];
+  int water_level[NUM_BARRELS];
 } SystemState;
 
 bool state_equal(SystemState *a, SystemState *b) {
@@ -271,7 +282,7 @@ bool state_equal(SystemState *a, SystemState *b) {
   if (a->pipe_water_present != b->pipe_water_present) {
     return false;
   }
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < NUM_BARRELS; i++) {
     // we'll call them equal if they are "close enough" (aka 10 counts)
     int diff = a->water_level[i] - b->water_level[i];
     if (diff < -10 || diff > +10) {
@@ -286,7 +297,7 @@ SystemState state = {
   STATE_CITY,
   false,
   false,
-  { 560, 630 },
+  { FOREACH_BARREL(555 COMMA) },
 };
 SystemState last_displayed_state = state;
 #ifdef RAINGAUGE_V2
@@ -401,7 +412,7 @@ void handleRoot() {
 "    <p>Uptime: %02d:%02d:%02d</p>\n"
 "    <p>User mode: %s %s %s</p>\n"
 "    <p>Active water source: %s</p>\n"
-"    <pre>%3d.%d%% %3d.%d%%</pre>\n"
+"    <pre>" FOREACH_BARREL("%3d.%d%% ") "</pre>\n"
 "    <p>Contacted recently by rain gauge: %s</p>\n"
 "    <p>Total flow: %.1lf gallons (raw count: %ld)</p>\n"
 "    <p>Pressure Switch: %s</p>\n"
@@ -414,8 +425,9 @@ void handleRoot() {
            state.user_state == STATE_AUTO ? "<b>AUTO</b>" : "<a href='/update?state=1'>auto</a>",
            state.user_state == STATE_RAIN ? "<b>RAIN</b>" : "<a href='/update?state=2'>rain</a>",
            state.active_state == STATE_CITY ? "City water" : "Rain barrels",
-           state.water_level[0]/10, state.water_level[0]%10,
-           state.water_level[1]/10, state.water_level[1]%10,
+#define BARREL_PRINTF(i)                                        \
+           state.water_level[i]/10, state.water_level[i]%10,
+           FOREACH_BARREL_ARG(BARREL_PRINTF)
            state.connected_recently ? "Yes" : "No",
            (double) (FLOW_TO_GALLONS(0, total_flow)),
            (long) (saw_good_reading ? total_flow : -1),
@@ -428,14 +440,12 @@ void handleUpdate() {
   // update level sensors
   boolean changedState = false;
   for (uint8_t i = 0; i < server.args(); i++) {
-    if (server.argName(i) == "level1") {
-      state.water_level[0] = server.arg(i).toInt();
-      lastPing.restart();
+#define HANDLE_BARREL(ii,jj)                            \
+    if (server.argName(i) == "level" #jj) {             \
+      state.water_level[ii] = server.arg(i).toInt();    \
+      lastPing.restart();                               \
     }
-    if (server.argName(i) == "level2") {
-      state.water_level[1] = server.arg(i).toInt();
-      lastPing.restart();
-    }
+    FOREACH_BARREL_ARG2(HANDLE_BARREL)
     if (server.argName(i) == "state") {
       state.user_state = server.arg(i).toInt();
       if (state.user_state < STATE_CITY || state.user_state > STATE_RAIN) {
@@ -453,8 +463,9 @@ void handleUpdate() {
   doc["active_state"] = state.active_state;
   doc["pipe_water_present"] = state.pipe_water_present;
   JsonArray water_level = doc.createNestedArray("water_level");
-  water_level.add(state.water_level[0]);
-  water_level.add(state.water_level[1]);
+  for(int i=0; i<NUM_BARRELS; i++) {
+    water_level.add(state.water_level[i]);
+  }
   String out = "";
   serializeJson(doc, out);
   server.send(200, "text/json", out);
@@ -960,26 +971,20 @@ void setup() {
     ha_device.setName("Rain Gauge");
     ha_device.setModel("Rain Gauge");
     //ha_device.setIcon("mdi:gauge");
-    ha_water_level1.setName("Water Level Barrel 1");
-    ha_water_level2.setName("Water Level Barrel 2");
-    ha_water_level1.setDeviceClass("volume_storage");
-    ha_water_level2.setDeviceClass("volume_storage");
-    ha_water_level1.setUnitOfMeasurement("%");
-    ha_water_level2.setUnitOfMeasurement("%");
-    ha_water_level1.setIcon("mdi:gauge");
-    ha_water_level2.setIcon("mdi:gauge");
-    ha_water_level1.setStateClass("measurement");
-    ha_water_level2.setStateClass("measurement");
-    ha_water_level1_raw.setName("Water Level Barrel 1 (raw)");
-    ha_water_level2_raw.setName("Water Level Barrel 2 (raw)");
-    ha_water_level1_raw.setDeviceClass("volume_storage");
-    ha_water_level2_raw.setDeviceClass("volume_storage");
-    //ha_water_level1_raw.setUnitOfMeasurement("counts");
-    //ha_water_level2_raw.setUnitOfMeasurement("counts");
-    ha_water_level1_raw.setIcon("mdi:gauge");
-    ha_water_level2_raw.setIcon("mdi:gauge");
-    ha_water_level1_raw.setStateClass("measurement");
-    ha_water_level2_raw.setStateClass("measurement");
+#define BARREL_NAME(i,j)                                        \
+    ha_water_level[i].setName("Water Level Barrel " #j);        \
+    ha_water_level_raw[i].setName("Water Level Barrel " #j " (raw)");
+    FOREACH_BARREL_ARG2(BARREL_NAME);
+    for (int i=0; i<NUM_BARRELS; i++) {
+      ha_water_level[i].setDeviceClass("volume_storage");
+      ha_water_level[i].setUnitOfMeasurement("%");
+      ha_water_level[i].setIcon("mdi:gauge");
+      ha_water_level[i].setStateClass("measurement");
+      ha_water_level_raw[i].setDeviceClass("volume_storage");
+      //ha_water_level_raw[i].setUnitOfMeasurement("counts");
+      ha_water_level_raw[i].setIcon("mdi:gauge");
+      ha_water_level_raw[i].setStateClass("measurement");
+    }
 #endif
 
     ha_mqtt.begin(MQTT_HOST, MQTT_USER, MQTT_PASS);
@@ -1040,7 +1045,7 @@ void setup() {
             Serial.println(serverBaseUrl);
         }
     }
-    for (int i=0; i<2; i++) {
+    for (int i=0; i<NUM_BARRELS; i++) {
         level_accum[i] = 0;
 #ifdef ADC_CONNECTED
         for (int j=0; j<LEVEL_SAMPLE_FILTER; j++) {
@@ -1087,10 +1092,11 @@ void sendUpdate(int new_user_state = -1) {
   HTTPClient http;
   WiFiClient client2; // not secure
   String url2 = serverBaseUrl;
-  url2 += "?level1=";
-  url2 += state.water_level[0];
-  url2 += "&level2=";
-  url2 += state.water_level[1];
+  url2 += "?x";
+#define BARREL_QUERY(i,j) \
+  url2 += "&level" #j "=";\
+  url2 += state.water_level[i];
+  FOREACH_BARREL_ARG2(BARREL_QUERY);
   if (new_user_state >= STATE_CITY && new_user_state <= STATE_RAIN) {
     url2 += "&state=";
     url2 += new_user_state;
@@ -1128,8 +1134,8 @@ void updateState() {
     // use .repeat() to ensure our filter bandwidth is relatively constant
     // even if there's a (slow) display refresh between samples
     lastLevelReading.repeat();
-    int32_t raw_level[2];
-    for (int i=0; i<2; i++) {
+    int32_t raw_level[NUM_BARRELS];
+    for (int i=0; i<NUM_BARRELS; i++) {
       level_accum[i] =
         ((int64_t)level_accum[i] * (LEVEL_SAMPLE_FILTER-1) / LEVEL_SAMPLE_FILTER)
 #ifdef ADC_CONNECTED
@@ -1156,14 +1162,13 @@ void updateState() {
     // periodically send levels to Home Assistant
     if (waterLevelFeedDelay.isExpired()) {
       // percentages
-      float percent;
-      percent = state.water_level[0] / (float)10;
-      ha_water_level1.setValue(static_cast<float>(percent));
-      percent = state.water_level[1] / (float)10;
-      ha_water_level2.setValue(static_cast<float>(percent));
-      // raw levels, for calibration purposes
-      ha_water_level1_raw.setValue(raw_level[0]);
-      ha_water_level2_raw.setValue(raw_level[1]);
+      for (int i=0; i<NUM_BARRELS; i++) {
+        float percent;
+        percent = state.water_level[i] / (float)10;
+        ha_water_level[i].setValue(static_cast<float>(percent));
+        // raw levels, for calibration purposes
+        ha_water_level_raw[i].setValue(raw_level[i]);
+      }
       // wait for next time
       waterLevelFeedDelay.restart();
     }
@@ -1230,7 +1235,11 @@ void updateState() {
     // rain barrels have filled up again.  So we should ignore
     // pipe_water_present if the rain barrel level is above like 33%
     if (state.connected_recently && !is_rain_empty) { // use rain barrel levels
-      is_rain_empty = (state.water_level[0] <= WATER_ALARM_LOW || state.water_level[1] <= WATER_ALARM_LOW);
+      for (int i=0; i<NUM_BARRELS; i++) {
+        if (state.water_level[i] <= WATER_ALARM_LOW) {
+          is_rain_empty = true;
+        }
+      }
     }
     // in auto
     if ( is_rain_empty ) {
@@ -1342,7 +1351,7 @@ void updateConfigDisplay() {
   display.print("Cntrst:");
   display.print(display.getContrast());
 #ifdef RAINGAUGE_V2
-  for (int i=0; i<2; i++) {
+  for (int i=0; i<NUM_BARRELS; i++) {
       display.print(" Level "); display.print(i); display.print(": ");
       display.print(ads1115.readADC_SingleEnded(i));
   }
@@ -1431,10 +1440,20 @@ void updateDisplay() {
   display.setCursor(display.width() - 4, 17);
   rightjustify(MDNS_NAME ".local");
 
+  // Total space taken is between y=BAR_TOP and y=BUTTON_HEIGHT; each bar uses
+  // BAR_SPACE (but only BAR_WIDTH of that is taken)
+  // For n=2 and LCD_HEIGHT=128:
+  //   BAR_TOP=26, BAR_HEIGHT=27, BAR_SPACE=37
+  //   First bar is from y=26 to y=53
+  //   Second bar is from y=63 to y=90
+  //   Buttons start at 100 (ie, 10 px below last bar, matching interbar space)
+  // For n=3 and LCD_HEIGHT=128:
+  //   BAR_TOP=26, BAR_HEIGHT=18, BAR_SPACE=24
+  //   Third bar is from y=74 to y=92 (8px above buttons; interbar space=6px)
 #define BAR_TOP 26
-#define BAR_HEIGHT (53-26)
+#define BAR_HEIGHT ((53-26)*2/NUM_BARRELS)
 #define BAR_WIDTH (LCD_WIDTH-38)
-#define BAR_SPACE (63-26)
+#define BAR_SPACE ((63-26)*2/NUM_BARRELS)
 #define BUTTON_HEIGHT 28
 
   if (displayState == DISPLAY_CONFIG) {
@@ -1455,13 +1474,17 @@ void updateDisplay() {
     return;
   }
 
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < NUM_BARRELS; i++) {
     int x = display.width() / 2 - (BAR_WIDTH / 2);
     int y = BAR_TOP + i * BAR_SPACE;
     int amount = state.water_level[i] * (BAR_WIDTH - 2) / 1000;
     display.setCursor(x - 4, y + (BAR_HEIGHT / 2) + 6);
     display.setTextColor(COLOR3);
-    rightjustify(i == 0 ? "1:" : "2:");
+    switch (i) {
+#define BARREL_LABEL(ii,jj)                     \
+      case ii: rightjustify( #jj ":"); break;
+      FOREACH_BARREL_ARG2(BARREL_LABEL)
+    }
     display.fillRect(x, y, BAR_WIDTH, BAR_HEIGHT, COLOR4);
     display.fillRect(x + 1, y + 1, BAR_WIDTH - 2, BAR_HEIGHT - 2, COLOR1);
 #ifdef RAINPUMP_V2
