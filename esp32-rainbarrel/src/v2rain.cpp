@@ -415,6 +415,7 @@ void handleRoot() {
 "    <pre>" FOREACH_BARREL("%3d.%d%% ") "</pre>\n"
 "    <p>Contacted recently by rain gauge: %s</p>\n"
 "    <p>Total flow: %.1lf gallons (raw count: %ld)</p>\n"
+"    <pre>" FOREACH_FLOWMETER("%.1lf ") "</pre>\n"
 "    <p>Pressure Switch: %s</p>\n"
 "    <img src=\"/test.svg\" />\n"
 "  </body>\n"
@@ -431,6 +432,9 @@ void handleRoot() {
            state.connected_recently ? "Yes" : "No",
            (double) (FLOW_TO_GALLONS(0, total_flow)),
            (long) (saw_good_reading ? total_flow : -1),
+#define FLOWMETER_PRINTF(i)                             \
+           (double) (lastFlowMeterReadingValid[i] ? FLOW_TO_GALLONS(0, lastFlowMeterReading[i]) : -1),
+           FOREACH_FLOWMETER_ARG(FLOWMETER_PRINTF)
            digitalRead(PRESSURE_SW) ? "OPEN" : "CLOSED"
           );
   server.send(200, "text/html", temp);
