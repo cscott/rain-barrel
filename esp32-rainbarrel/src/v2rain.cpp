@@ -212,11 +212,21 @@ AsyncDelay waterLevelFeedDelay = AsyncDelay(11*SECONDS_MS + 3, AsyncDelay::MILLI
   HASensorNumber("waterlevel_" #y, HASensorNumber::PrecisionP1),
 #define BARREL_SENSOR_RAW(x,y)                                           \
   HASensorNumber("waterlevel_raw_" #y, HASensorNumber::PrecisionP0),
+#define BARREL_SENSOR_MIN(x,y)                                  \
+  HANumber("waterlevel_min_" #y, HASensorNumber::PrecisionP0),
+#define BARREL_SENSOR_MAX(x,y)                                  \
+  HANumber("waterlevel_max_" #y, HASensorNumber::PrecisionP0),
 HASensorNumber ha_water_level[NUM_BARRELS] = {
   FOREACH_BARREL_ARG2(BARREL_SENSOR)
 };
 HASensorNumber ha_water_level_raw[NUM_BARRELS] = {
   FOREACH_BARREL_ARG2(BARREL_SENSOR_RAW)
+};
+HANumber ha_water_level_min[NUM_BARRELS] = {
+  FOREACH_BARREL_ARG2(BARREL_SENSOR_MIN)
+};
+HANumber ha_water_level_max[NUM_BARRELS] = {
+  FOREACH_BARREL_ARG2(BARREL_SENSOR_MAX)
 };
 #endif /* RAINGAUGE_V2 */
 #endif /* USE_MQTT */
@@ -999,7 +1009,9 @@ void setup() {
     //ha_device.setIcon("mdi:gauge");
 #define BARREL_NAME(i,j)                                        \
     ha_water_level[i].setName("Water Level Barrel " #j);        \
-    ha_water_level_raw[i].setName("Water Level Barrel " #j " (raw)");
+    ha_water_level_raw[i].setName("Water Level Barrel " #j " (raw)"); \
+    ha_water_level_min[i].setName("Water Level Barrel " #j " Minimum (raw)"); \
+    ha_water_level_max[i].setName("Water Level Barrel " #j " Maximum (raw)");
     FOREACH_BARREL_ARG2(BARREL_NAME);
     for (int i=0; i<NUM_BARRELS; i++) {
       ha_water_level[i].setDeviceClass("volume_storage");
@@ -1010,6 +1022,18 @@ void setup() {
       //ha_water_level_raw[i].setUnitOfMeasurement("counts");
       ha_water_level_raw[i].setIcon("mdi:gauge");
       ha_water_level_raw[i].setStateClass("measurement");
+      ha_water_level_min[i].setMin(0);
+      ha_water_level_max[i].setMin(0);
+      ha_water_level_min[i].setMax(32768);
+      ha_water_level_max[i].setMax(32768);
+      ha_water_level_min[i].setStep(1);
+      ha_water_level_max[i].setStep(1);
+      ha_water_level_min[i].setOptimistic(true);
+      ha_water_level_max[i].setOptimistic(true);
+      ha_water_level_min[i].setRetain(true);
+      ha_water_level_max[i].setRetain(true);
+      ha_water_level_min[i].setCurrentState(WATER_READING_ZERO);
+      ha_water_level_max[i].setCurrentState(WATER_READING_FULL);
     }
 #endif
 
@@ -1169,8 +1193,10 @@ void updateState() {
 #endif
           ;
       raw_level[i] = level_accum[i] / LEVEL_SAMPLE_FILTER;
-      state.water_level[i] = (raw_level[i] - WATER_READING_ZERO) * 1000
-        / (WATER_READING_FULL - WATER_READING_ZERO);
+      int32_t water_reading_zero = ha_water_level_min[i].getCurrentState().toInt32();
+      int32_t water_reading_full = ha_water_level_max[i].getCurrentState().toInt32();
+      state.water_level[i] = (raw_level[i] - water_reading_zero) * 1000
+        / (water_reading_full - water_reading_zero);
       if (state.water_level[i] < 0) {
         state.water_level[i] = 0;
       }
