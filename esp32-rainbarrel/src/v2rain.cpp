@@ -159,7 +159,7 @@ AsyncDelay capReadInterval = AsyncDelay(50 + 3, AsyncDelay::MILLIS); // read @ 2
 WiFiClient client; // change to WiFiClientSecure for TLS support
 #ifdef USE_MQTT
 HADevice ha_device;
-HAMqtt ha_mqtt(client, ha_device, 10/*maximum entities*/);
+HAMqtt ha_mqtt(client, ha_device, 15/*maximum entities*/);
 # define MQTT_HOST IPAddress(192,168,198,32)
 # define MQTT_USER "mqtt103"
 # define MQTT_PASS "mqtt103"
