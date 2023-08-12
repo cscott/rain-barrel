@@ -228,6 +228,10 @@ HANumber ha_water_level_min[NUM_BARRELS] = {
 HANumber ha_water_level_max[NUM_BARRELS] = {
   FOREACH_BARREL_ARG2(BARREL_SENSOR_MAX)
 };
+
+static void onNumberCommand(HANumeric number, HANumber *sender) {
+  sender->setState(number); // store new value; report the selected option back
+}
 #endif /* RAINGAUGE_V2 */
 #endif /* USE_MQTT */
 
@@ -1028,12 +1032,12 @@ void setup() {
       ha_water_level_max[i].setMax(32768);
       ha_water_level_min[i].setStep(1);
       ha_water_level_max[i].setStep(1);
-      ha_water_level_min[i].setOptimistic(true);
-      ha_water_level_max[i].setOptimistic(true);
       ha_water_level_min[i].setRetain(true);
       ha_water_level_max[i].setRetain(true);
       ha_water_level_min[i].setCurrentState(WATER_READING_ZERO);
       ha_water_level_max[i].setCurrentState(WATER_READING_FULL);
+      ha_water_level_min[i].onCommand(onNumberCommand);
+      ha_water_level_max[i].onCommand(onNumberCommand);
     }
 #endif
 
