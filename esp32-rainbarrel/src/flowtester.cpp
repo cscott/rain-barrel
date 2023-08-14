@@ -151,7 +151,7 @@ void updateDisplay(
 #ifdef SNITCH_TESTER
                    uint8_t *buf, bool goodComm
 #else
-                   uint64_t count
+                   uint64_t count, uint8_t nBytes
 #endif
 ) {
   display.clearDisplay();
@@ -170,7 +170,9 @@ void updateDisplay(
       display.println("mDNS: " MDNS_NAME);
   }
 #ifdef SNITCH_TESTER
-  display.print("Seq ");
+  display.print("S#");
+  display.print(SNITCH_OFFSET);
+  display.print(" Seq ");
   printHex(buf[0]);
   display.print(" ");
   printHex(buf[9]);
@@ -200,8 +202,14 @@ void updateDisplay(
       display.println();
   }
 #else
-  display.setTextSize(2);
-  display.println(count);
+  display.setTextSize(1);
+  display.print("F#");
+  display.print(FLOWMETER_OFFSET);
+  display.print(": ");
+  display.print(count);
+  display.print(" (");
+  display.print(nBytes);
+  display.println(")");
 #endif
   display.display();
 }
@@ -248,10 +256,11 @@ void loop() {
 
     Wire.requestFrom(FLOWMETER_I2C_ADDR_BASE + FLOWMETER_OFFSET, 8);
     uint64_t count = 0;
-    for (int i=0; Wire.available(); i++) {
+    int i;
+    for (i=0; Wire.available(); i++) {
         count |= ((uint64_t)Wire.read()) << (8*i);
     }
-    updateDisplay(count);
+    updateDisplay(count, i);
 #endif
 }
 
