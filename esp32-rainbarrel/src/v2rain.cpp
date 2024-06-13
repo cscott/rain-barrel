@@ -203,6 +203,8 @@ HASensorNumber ha_smrty_temperature[NUM_SNITCHES] = {
 
 HABinarySensor ha_pressure_sensor("pressure_sensor");
 
+HANumber ha_water_level_low_limit("waterlevel_low_limit", HASensorNumber::PrecisionP1);
+
 #endif /* RAINPUMP_V2 */
 
 #ifdef RAINGAUGE_V2
@@ -229,10 +231,12 @@ HANumber ha_water_level_max[NUM_BARRELS] = {
   FOREACH_BARREL_ARG2(BARREL_SENSOR_MAX)
 };
 
+#endif /* RAINGAUGE_V2 */
+
 static void onNumberCommand(HANumeric number, HANumber *sender) {
   sender->setState(number); // store new value; report the selected option back
 }
-#endif /* RAINGAUGE_V2 */
+
 #endif /* USE_MQTT */
 
 #ifdef RAINPUMP_V2
@@ -1005,6 +1009,15 @@ void setup() {
 
     ha_pressure_sensor.setName("Pump Running");
     ha_pressure_sensor.setDeviceClass("running");
+
+    ha_water_level_low_limit.setName("Water Level Low Limit");
+    ha_water_level_low_limit.setUnitOfMeasurement("%");
+    ha_water_level_low_limit.setMin(0);
+    ha_water_level_low_limit.setMax(100);
+    ha_water_level_low_limit.setStep(0.1);
+    ha_water_level_low_limit.setRetain(true);
+    ha_water_level_low_limit.setCurrentState((float)(WATER_ALARM_LOW/10.));
+    ha_water_level_low_limit.onCommand(onNumberCommand);
 #endif
 
 #ifdef RAINGAUGE_V2
@@ -1300,8 +1313,12 @@ void updateState() {
     // rain barrels have filled up again.  So we should ignore
     // pipe_water_present if the rain barrel level is above like 33%
     if (state.connected_recently && !is_rain_empty) { // use rain barrel levels
+      float alarm_level = ha_water_level_low_limit.getCurrentState().toFloat() * 10;
+#ifdef DEV_MODE
+      alarm_level = WATER_ALARM_LOW;
+#endif
       for (int i=0; i<NUM_BARRELS; i++) {
-        if (state.water_level[i] <= WATER_ALARM_LOW) {
+        if (state.water_level[i] <= alarm_level) {
           is_rain_empty = true;
         }
       }
