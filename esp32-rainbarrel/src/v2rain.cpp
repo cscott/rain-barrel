@@ -68,7 +68,7 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
 
 #define SERVER_MDNS_NAME "rainpump"
 #define CLIENT_MDNS_NAME "raingauge"
-#define WATER_ALARM_LOW 100 /* 10% */
+#define WATER_ALARM_LOW 50 /* 5% */
 #define KEEPALIVE_INTERVAL_SECS 60
 #define LEVEL_SENSOR_INTERVAL_SECS 1
 #define SERVER_PORT 80
