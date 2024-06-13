@@ -1197,6 +1197,11 @@ void updateState() {
 #endif
           ;
       raw_level[i] = level_accum[i] / LEVEL_SAMPLE_FILTER;
+      if (i==2) {
+        //HACK HACK HACK: I don't have the 3rd level sensor hooked up,
+        // so fake it by copying the value from barrel #1
+        raw_level[i] = raw_level[0];
+      }
       int32_t water_reading_zero = ha_water_level_min[i].getCurrentState().toInt32();
       int32_t water_reading_full = ha_water_level_max[i].getCurrentState().toInt32();
       state.water_level[i] = (raw_level[i] - water_reading_zero) * 1000

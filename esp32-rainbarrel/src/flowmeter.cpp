@@ -3,6 +3,12 @@
 #include <Wire.h>
 #include "flowmeter.h"
 
+/************************************************************************/
+/* PIN 5 IN DIGISPARK IS ALSO USED FOR RESET!!                          */
+/* You must reprogram the fuses to make pin 5 available for actual I/O  */
+/************************************************************************/
+
+
 #define LED_PIN 1
 #define TURBINE_PIN 5
 #define DEBOUNCE 16
