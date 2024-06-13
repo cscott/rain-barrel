@@ -516,27 +516,41 @@ bool pollSmrtySnitch(uint8_t snitchId);
 void handleTest() {
   char temp[800];
   uint8_t snitchId = 0;
+  bool onlyPoll = false;
+  uint8_t bufferOffset = 0;
   for (uint8_t i = 0; i < server.args(); i++) {
     if (server.argName(i) == "id") {
       snitchId = (uint8_t) server.arg(i).toInt();
+    } else if (server.argName(i) == "off") {
+      bufferOffset = (uint8_t) server.arg(i).toInt();
+    } else if (server.argName(i) == "poll") {
+      onlyPoll = true;
     }
   }
-  uint8_t seqno;
+  uint8_t seqno = 0;
   struct smrty_msg msg;
-  uint8_t good_checksum;
-  bool st = 1 ? pollSmrtySnitch(snitchId) :
-    readSmrtySnitch(snitchId, 0xC0, &seqno, &msg, &good_checksum);
+  uint8_t good_checksum = true;
+  memset(&msg, 0, sizeof(msg));
+  bufferOffset = bufferOffset % SNITCH_BUFFER_SIZE;
+  bool st = onlyPoll ? pollSmrtySnitch(snitchId) :
+    readSmrtySnitch(snitchId, bufferOffset, &seqno, &msg, &good_checksum);
   snprintf(temp, 800, "<html><body>Snitch %d:<pre>\n"
            "Return value: %s\n"
-           "[%02X] %02X %02X %02X %02X | %02X %02X %02X | %02X%s\n"
+           "%d: [%02X] %02X %02X %02X %02X | %02X %02X %02X | %02X%s\n"
            "</pre>"
+           "Last Seqno:"
+           FOREACH_SNITCH(" %d:%02X")
            "</body></html>",
            (int) snitchId,
            st ? "true" : "false",
-           (int)seqno,
+           (int) bufferOffset,
+           (int) seqno,
            msg.addr, msg.cmd, msg.tx_data1, msg.tx_data2,
            msg.rx_data1, msg.rx_data2, msg.status,
-           msg.checksum, good_checksum ? "":"*"
+           msg.checksum, good_checksum ? "[good]":"[bad]"
+#define LAST_SEQNO(x) , x, smrtyLastSeqno[x]
+           FOREACH_SNITCH_ARG(LAST_SEQNO)
+#undef LAST_SEQNO
            );
   // Output
   server.send(200, "text/html", temp);
