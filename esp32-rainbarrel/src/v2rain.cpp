@@ -984,6 +984,7 @@ void setup() {
 
     ha_valve_state_sensor.setName("Using Rain Water");
     ha_valve_state_sensor.setIcon("mdi:weather-rainy");
+    ha_valve_state_sensor.setStateClass("measurement");
     ha_set_valve_state_sensor(true);
 
     ha_valve_state_select.setName("Water Source");
@@ -994,6 +995,7 @@ void setup() {
 
     ha_pipe_water_sensor.setName("Pipe Water Present");
     ha_pipe_water_sensor.setDeviceClass("moisture");
+    ha_pipe_water_sensor.setStateClass("measurement");
 
 #define FLOWMETER_NAME(i,j)                              \
     ha_flow_meter[i].setName("Irrigation Flow " #j);
@@ -1023,6 +1025,7 @@ void setup() {
 
     ha_pressure_sensor.setName("Pump Running");
     ha_pressure_sensor.setDeviceClass("running");
+    ha_pressure_sensor.setStateClass("measurement");
 
     ha_water_level_low_limit.setName("Water Level Low Limit");
     ha_water_level_low_limit.setUnitOfMeasurement("%");
