@@ -69,6 +69,7 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
 #define SERVER_MDNS_NAME "rainpump"
 #define CLIENT_MDNS_NAME "raingauge"
 #define WATER_ALARM_LOW 50 /* 5% */
+#define WATER_ALARM_HYSTERESIS 30 /* 3% */
 #define KEEPALIVE_INTERVAL_SECS 60
 #define LEVEL_SENSOR_INTERVAL_SECS 1
 #define SERVER_PORT 80
@@ -1246,8 +1247,8 @@ void updateState() {
       }
 #ifdef DEV_MODE
       // XXX avoid cycling the valves in auto mode while we're testing
-      if (state.water_level[i] <= WATER_ALARM_LOW) {
-        state.water_level[i] = WATER_ALARM_LOW+1;
+      if (state.water_level[i] <= WATER_ALARM_LOW + WATER_ALARM_HYSTERESIS) {
+        state.water_level[i] = WATER_ALARM_LOW + WATER_ALARM_HYSTERESIS + 1;
       }
 #endif
     }
@@ -1334,6 +1335,9 @@ void updateState() {
 #ifdef DEV_MODE
       alarm_level = WATER_ALARM_LOW;
 #endif
+      if (state.active_state == STATE_CITY) {
+	alarm_level += WATER_ALARM_HYSTERESIS;
+      }
       for (int i=0; i<NUM_BARRELS; i++) {
         if (state.water_level[i] <= alarm_level) {
           is_rain_empty = true;
