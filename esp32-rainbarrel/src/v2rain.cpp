@@ -889,6 +889,7 @@ void setup() {
     digitalWrite(LED_BUILTIN, HIGH);
 
 #ifdef RAINPUMP_V2
+    setPumpCntrl(PUMP_OFF); // pump is off at reboot
     pinMode(WATER_SENSE, INPUT_PULLUP);
     pinMode(PRESSURE_SW, INPUT);
     pinMode(PUMP_CNTRL, OUTPUT);
@@ -910,7 +911,6 @@ void setup() {
 
 #ifdef RAINPUMP_V2
     idleValve(); // this will handle the SNITCHMOTOR case too
-    setPumpCntrl(PUMP_OFF);
 #endif
 
 #ifdef RAINGAUGE_V2
