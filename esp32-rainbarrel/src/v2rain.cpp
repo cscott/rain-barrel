@@ -14,6 +14,7 @@
 #include <Wire.h>
 #include <SPI.h> // this is done to help pio discover this dependency
 #include <AsyncDelay.h>
+#include "NoBounce.h"
 
 #include <WiFi.h>
 #include <ESPmDNS.h>
@@ -103,6 +104,8 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
 #define COMMA ,
 
 enum PumpCntrl { PUMP_OFF = 0, PUMP_ON = 1 };
+#define PRESSURE_SW_OPEN true
+#define PRESSURE_SW_CLOSED false
 
 #define COLOR1 0x00 // was: EPD_WHITE
 #define COLOR2 0x7F // was: EPD_LIGHT
@@ -171,6 +174,7 @@ HAMqtt ha_mqtt(client, ha_device, 15/*maximum entities*/);
 #ifdef USE_MQTT
 
 #ifdef RAINPUMP_V2
+NoBounce<enum PumpCntrl> pumpBounce(PUMP_OFF, 5*SECONDS_MS, AsyncDelay::MILLIS);
 // Update valve state every ~5 minutes; this is the MQTT keepalive.
 AsyncDelay valveStateFeedMaxDelay = AsyncDelay(5*MINUTES_MS - 1019, AsyncDelay::MILLIS);
 AsyncDelay valveStateFeedMinDelay = AsyncDelay(1*SECONDS_MS + 13, AsyncDelay::MILLIS); // not more than 1/second
@@ -471,7 +475,7 @@ void handleRoot() {
 #define FLOWMETER_PRINTF(i)                             \
            (double) (lastFlowMeterReadingValid[i] ? FLOW_TO_GALLONS(0, lastFlowMeterReading[i]) : -1),
            FOREACH_FLOWMETER_ARG(FLOWMETER_PRINTF)
-           digitalRead(PRESSURE_SW) ? "OPEN" : "CLOSED"
+           digitalRead(PRESSURE_SW) == PRESSURE_SW_OPEN ? "OPEN" : "CLOSED"
           );
   server.send(200, "text/html", temp);
 }
@@ -612,8 +616,20 @@ bool readFlowMeter(uint64_t *result, uint8_t which) {
 void setPumpCntrl(enum PumpCntrl is_on) {
   // if we turn pump ON and then PRESSURE_SW turns it off (ie is HIGH)
   // less than XX seconds later, then leave pump off for YY seconds before
-  // trying to turn the pump on again. (exponential backoff on YY?)
-    digitalWrite(PUMP_CNTRL, !is_on); // active low
+  // trying to turn the pump on again.
+
+  // drive pumpBounce with <is_on & pressure_switch = closed>, which is
+  // actual pump control signal.
+
+  // if pumpBounce says the result should be OFF but is_on, then don't drive
+  // is_on. (if pumpBounce says the result should be ON but !is_on, then
+  // the pressure switch is limiting us.  Hardware safety FTW.)
+  if (digitalRead(PRESSURE_SW) == PRESSURE_SW_OPEN) {
+    is_on = PUMP_OFF;
+  }
+
+  is_on = pumpBounce.update(is_on);
+  digitalWrite(PUMP_CNTRL, !is_on); // active low
 }
 
 void setValve(enum PumpState state) {
@@ -1476,7 +1492,7 @@ void updateConfigDisplay() {
     display.print("-");
   }
   display.print(" Press:");
-  display.print(digitalRead(PRESSURE_SW)?"OP":"CL");
+  display.print(digitalRead(PRESSURE_SW) == PRESSURE_SW_OPEN?"OP":"CL");
   display.print(" SMRTY:");
   for (int i=0; i<NUM_SNITCHES; i++) {
     snprintf(buf, 10, "%02X ", smrtyLastSeqno[i]);
