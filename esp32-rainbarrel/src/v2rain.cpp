@@ -448,7 +448,8 @@ void handleRoot() {
 "  </head>\n"
 "  <body>\n"
 "    <h1>Rainbarrel Pump Manager</h1>\n"
-"    <p><a href='https://io.adafruit.com/cscott/dashboards/griggs-corner-rain-barrels?kiosk=true'>Dashboard</a></p>\n"
+//"    <p><a href='https://io.adafruit.com/cscott/dashboards/griggs-corner-rain-barrels?kiosk=true'>Dashboard</a></p>\n"
+"    <p><a href='http://homeassistant.local:8123/rain-barrels'>Home Assistant</a></p>"
 "    <p>Uptime: %02d:%02d:%02d</p>\n"
 "    <p>User mode: %s %s %s</p>\n"
 "    <p>Active water source: %s</p>\n"
@@ -457,7 +458,7 @@ void handleRoot() {
 "    <p>Total flow: %.1lf gallons (raw count: %ld)</p>\n"
 "    <pre>" FOREACH_FLOWMETER("%.1lf ") "</pre>\n"
 "    <p>Pressure Switch: %s</p>\n"
-"    <img src=\"/test.svg\" />\n"
+//"    <img src=\"/test.svg\" />\n"
 "  </body>\n"
 "</html>",
 
@@ -502,7 +503,7 @@ void handleUpdate() {
     updateState(); // update active state to match new user state
   }
   // output our current state
-  StaticJsonDocument<96> doc;
+  StaticJsonDocument<128> doc;
   doc["user_state"] = state.user_state;
   doc["active_state"] = state.active_state;
   doc["pipe_water_present"] = state.pipe_water_present;
