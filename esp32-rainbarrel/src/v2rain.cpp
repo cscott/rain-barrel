@@ -624,7 +624,6 @@ void setPumpCntrl(enum PumpCntrl is_on) {
   if (digitalRead(PRESSURE_SW) == PRESSURE_SW_OPEN) {
     pumpBounceRunning = true;
     pumpBounce.restart();
-    is_on = PUMP_OFF;
   }
   if (pumpBounceRunning && pumpBounce.isExpired()) {
     pumpBounceRunning = false;
@@ -632,7 +631,7 @@ void setPumpCntrl(enum PumpCntrl is_on) {
   if (pumpBounceRunning) {
     is_on = PUMP_OFF; // inhibit pump to prevent bounce
   }
-  digitalWrite(PUMP_CNTRL, !is_on); // active low
+  digitalWrite(PUMP_CNTRL, is_on == PUMP_OFF); // active low
 }
 
 void setValve(enum PumpState state) {
@@ -1382,13 +1381,13 @@ void updateState() {
     valveStateFeedMaxDelay.expire();
 #endif /* USE_MQTT */
     valveRunLength.restart();
-    setPumpCntrl((state.active_state == STATE_CITY) ? PUMP_OFF : PUMP_ON);
     setValve((enum PumpState)state.active_state);
     not_idled = true;
   } else if (not_idled && valveRunLength.isExpired()) {
     idleValve();
     not_idled = false;
   }
+  setPumpCntrl((state.active_state == STATE_CITY) ? PUMP_OFF : PUMP_ON);
 
 #ifdef USE_MQTT
   if (valveStateFeedMaxDelay.isExpired() && valveStateFeedMinDelay.isExpired()) {
@@ -1498,6 +1497,8 @@ void updateConfigDisplay() {
   }
   display.print(" Press:");
   display.print(digitalRead(PRESSURE_SW) == PRESSURE_SW_OPEN?"OP":"CL");
+  if (pumpBounceRunning) { display.print("R"); }
+  if (pumpBounce.isExpired()) { display.print("E"); }
   display.print(" SMRTY:");
   for (int i=0; i<NUM_SNITCHES; i++) {
     snprintf(buf, 10, "%02X ", smrtyLastSeqno[i]);
@@ -1718,7 +1719,7 @@ void loop() {
 #ifdef RAINPUMP_V2
   // Hack in ha_pressure_sensor reading, which doesn't have a
   // proper polling loop
-  ha_pressure_sensor.setState(!digitalRead(PRESSURE_SW));
+  ha_pressure_sensor.setState(digitalRead(PRESSURE_SW) != PRESSURE_SW_OPEN);
 #endif
   ha_mqtt.loop();
 #endif /* USE_MQTT */
