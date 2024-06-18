@@ -14,7 +14,6 @@
 #include <Wire.h>
 #include <SPI.h> // this is done to help pio discover this dependency
 #include <AsyncDelay.h>
-#include "NoBounce.h"
 
 #include <WiFi.h>
 #include <ESPmDNS.h>
@@ -174,7 +173,8 @@ HAMqtt ha_mqtt(client, ha_device, 15/*maximum entities*/);
 #ifdef USE_MQTT
 
 #ifdef RAINPUMP_V2
-NoBounce<enum PumpCntrl> pumpBounce(PUMP_OFF, 5*SECONDS_MS, AsyncDelay::MILLIS);
+AsyncDelay pumpBounce = AsyncDelay(15*SECONDS_MS, AsyncDelay::MILLIS);
+bool pumpBounceRunning = false;
 // Update valve state every ~5 minutes; this is the MQTT keepalive.
 AsyncDelay valveStateFeedMaxDelay = AsyncDelay(5*MINUTES_MS - 1019, AsyncDelay::MILLIS);
 AsyncDelay valveStateFeedMinDelay = AsyncDelay(1*SECONDS_MS + 13, AsyncDelay::MILLIS); // not more than 1/second
@@ -618,17 +618,20 @@ void setPumpCntrl(enum PumpCntrl is_on) {
   // less than XX seconds later, then leave pump off for YY seconds before
   // trying to turn the pump on again.
 
-  // drive pumpBounce with <is_on & pressure_switch = closed>, which is
-  // actual pump control signal.
+  // <is_on & pressure_switch = closed>, is actual pump control signal.
 
-  // if pumpBounce says the result should be OFF but is_on, then don't drive
-  // is_on. (if pumpBounce says the result should be ON but !is_on, then
-  // the pressure switch is limiting us.  Hardware safety FTW.)
+  // whenever pressure switch opens, inhibit is_on for a period of time.
   if (digitalRead(PRESSURE_SW) == PRESSURE_SW_OPEN) {
+    pumpBounceRunning = true;
+    pumpBounce.restart();
     is_on = PUMP_OFF;
   }
-
-  is_on = pumpBounce.update(is_on);
+  if (pumpBounceRunning && pumpBounce.isExpired()) {
+    pumpBounceRunning = false;
+  }
+  if (pumpBounceRunning) {
+    is_on = PUMP_OFF; // inhibit pump to prevent bounce
+  }
   digitalWrite(PUMP_CNTRL, !is_on); // active low
 }
 
@@ -1174,6 +1177,8 @@ void setup() {
     }
     flowMeterInterval.restart(); // next read the flow meter in a minute
     flowMeterIntervalMax.expire(); // report the first reading regardless
+    pumpBounce.restart();
+    pumpBounceRunning = true;
 #endif
 
     Serial.println("Ready");
