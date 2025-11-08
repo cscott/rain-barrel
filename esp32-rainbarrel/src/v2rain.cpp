@@ -1072,7 +1072,9 @@ void setup() {
     FOREACH_BARREL_ARG2(BARREL_NAME);
     for (int i=0; i<NUM_BARRELS; i++) {
       ha_water_level[i].setDeviceClass("volume_storage");
-      ha_water_level[i].setUnitOfMeasurement("%");
+      // unit of measurement enforcement got strict:
+      // https://github.com/home-assistant/core/issues/155785
+      //ha_water_level[i].setUnitOfMeasurement("%");
       ha_water_level[i].setIcon("mdi:gauge");
       ha_water_level[i].setStateClass("measurement");
       ha_water_level_raw[i].setDeviceClass("volume_storage");
