@@ -238,8 +238,14 @@ HANumber ha_water_level_max[NUM_BARRELS] = {
 
 #endif /* RAINGAUGE_V2 */
 
+HANumber ha_display_contrast("display_contrast", HASensorNumber::PrecisionP0);
+
 static void onNumberCommand(HANumeric number, HANumber *sender) {
   sender->setState(number); // store new value; report the selected option back
+}
+static void onContrastCommand(HANumeric number, HANumber *sender) {
+  sender->setState(number); // store new value; report the selected option back
+  display.setContrast(number.toUInt8());
 }
 
 #endif /* USE_MQTT */
@@ -952,9 +958,6 @@ void setup() {
     // because the consequences of turning on the internal booster when
     // we've got an external supply set up are sufficiently dire.
     display.begin(false /* !adp1650_found*/);
-#ifdef RAINGAUGE_V2
-    display.setContrast(83); // different default contrast for outdoors
-#endif
     Serial.println(ESP.getFreeHeap(),DEC);
     display.clearDisplay();
     display.setTextColor(COLOR4);
@@ -1090,6 +1093,19 @@ void setup() {
       ha_water_level_max[i].onCommand(onNumberCommand);
     }
 #endif
+    ha_display_contrast.setName("Display Contrast");
+    ha_display_contrast.setMin(0);
+    ha_display_contrast.setMax(0x7F);
+    ha_display_contrast.setStep(1);
+    ha_display_contrast.setRetain(true);
+    ha_display_contrast.setCurrentState(
+#ifdef RAINGAUGE_V2
+	83 // different default contrast for outdoors
+#else
+	0x40 /* default contrast */
+#endif
+    );
+    ha_display_contrast.onCommand(onContrastCommand);
 
     ha_mqtt.begin(MQTT_HOST, MQTT_USER, MQTT_PASS);
 #endif
@@ -1524,12 +1540,16 @@ void handleConfigDisplayButtons(ButtonPress button_press) {
   } else if (button_press.b) {
     config_display_menu_selected++;
   } else if (button_press.c) {
+    uint8_t contrast = ha_display_contrast.getCurrentState().isSet() ?
+      ha_display_contrast.getCurrentState().toUInt8() : display.getContrast();
     switch (config_display_menu_selected) {
     case 0:
-      display.setContrast(display.getContrast() + 1);
-      break;
+      contrast += 2; // tricky way to add 1
+      // fall through
     case 1:
-      display.setContrast(display.getContrast() - 1);
+      contrast -= 1;
+      ha_display_contrast.setState(contrast);
+      display.setContrast(contrast);
       break;
     case 2:
       displayState = DISPLAY_MAIN;
