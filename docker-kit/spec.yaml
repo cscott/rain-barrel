@@ -1,0 +1,29 @@
+schemaVersion: "1"
+kind: mixin
+name: platformio
+displayName: platformio support
+description: platformio support for esp32 chipsets
+
+network:
+  allowedDomains:
+    - "*.registry.platformio.org"
+    - "*.platformio.org"
+    - "*.espressif.com"
+
+commands:
+  install:
+    - command: |
+        apt-get update
+        apt-get install -y python3.13-venv
+      user: "0"
+      description: "Install python-venv"
+    - command: |
+        curl -fsSL -o /tmp/get-platformio.py https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py
+        python3 /tmp/get-platformio.py
+        mkdir -p $HOME/.local/bin
+        ln -s $HOME/.platformio/penv/bin/platformio $HOME/.platformio/penv/bin/pio $HOME/.platformio/penv/bin/piodebuggdb $HOME/.local/bin/
+      user: "1000"
+      description: "Install platformio"
+    - command: "pio platform install espressif32"
+      user: "1000"
+      description: "Install esp32 platform"

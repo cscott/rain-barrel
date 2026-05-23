@@ -1,3 +1,5 @@
+To enter the environment w/ platformio installed:
+ source env/bin/activate
 To build:
  pio run
 To upload:
@@ -21,3 +23,13 @@ comparator channel with the `boildown.py` script.)
 
 You can also run a unit test:
   pio test -e native
+
+(To create a new python venv environment:
+ python -m venv <new env directory>
+ source <new env directory>/bin/activate
+ pip install ....
+)
+
+To launch a sandboxed claude environment:
+ cd ..
+ sbx run claude --kit docker-kit/ --branch auto
