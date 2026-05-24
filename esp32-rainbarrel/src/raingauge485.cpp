@@ -7,6 +7,7 @@
 #include <WebServer.h>
 #include <ArduinoOTA.h>
 #include <AsyncDelay.h>
+#include <HTTPClient.h>
 #include "config.h"
 
 #define SERVER_MDNS_NAME "rainpump"
@@ -38,7 +39,11 @@ uint8_t sensorUnit[NUM_SENSORS];
 uint8_t sensorDecimals[NUM_SENSORS];
 bool    sensorConfigValid[NUM_SENSORS];
 
-AsyncDelay pollInterval = AsyncDelay(5 * SECONDS_MS + 3, AsyncDelay::MILLIS);
+AsyncDelay pollInterval    = AsyncDelay(5 * SECONDS_MS + 3, AsyncDelay::MILLIS);
+AsyncDelay keepaliveTimer  = AsyncDelay(60 * SECONDS_MS - 7, AsyncDelay::MILLIS);
+
+int16_t lastSentLevel[NUM_SENSORS];
+int     lastSentCount = 0;
 
 // ── MODBUS CRC16 (polynomial 0xA001) ─────────────────────────────────────────
 
@@ -135,15 +140,43 @@ bool setDeviceAddress(uint8_t currentAddr, uint8_t newAddr) {
     return modbus_write_reg(newAddr, 0x000F, 0x0000); // save to EEPROM
 }
 
-// ── sendUpdate stub ───────────────────────────────────────────────────────────
+// ── sendUpdate ────────────────────────────────────────────────────────────────
 
-// Stub: will eventually send calibrated water levels to rainpump32 via HTTP GET
-// to serverBaseUrl, as raingauge32 does in v2rain.cpp.  Not called until
-// hardware is tested and level min/max are calibrated.
+static bool levelsChanged() {
+    int count = 0;
+    for (int i = 0; i < NUM_SENSORS; i++) {
+        if (!sensorPresent[i]) continue;
+        if (count >= lastSentCount || sensorValue[i] != lastSentLevel[count])
+            return true;
+        count++;
+    }
+    return count != lastSentCount;
+}
+
+// Send raw sensor values to rainpump32.  Calibration (raw → 0–1000%) is done
+// on rainpump32 side.  Present sensors are packed: first valid → level1, etc.
 void sendUpdate() {
-    // TODO: build URL from serverBaseUrl, append ?level1=...&level2=...&level3=...
-    // and send HTTP GET as raingauge32 does in v2rain.cpp sendUpdate().
-    (void)serverBaseUrl;
+    HTTPClient http;
+    WiFiClient client;
+    String url = serverBaseUrl;
+    url += "?x";
+    int count = 0;
+    for (int i = 0; i < NUM_SENSORS; i++) {
+        if (!sensorPresent[i]) continue;
+        count++;
+        url += "&level";
+        url += count;
+        url += "=";
+        url += (int)sensorValue[i];
+        lastSentLevel[count - 1] = sensorValue[i];
+    }
+    for (int i = count; i < NUM_SENSORS; i++) lastSentLevel[i] = 0;
+    lastSentCount = count;
+    Serial.println(url);
+    http.begin(client, url);
+    http.GET();
+    http.end();
+    keepaliveTimer.restart();
 }
 
 // ── Depth formatting helpers ──────────────────────────────────────────────────
@@ -328,7 +361,9 @@ void setup() {
         sensorUnit[i]        = 0;
         sensorDecimals[i]    = 0;
         sensorConfigValid[i] = false;
+        lastSentLevel[i]     = 0;
     }
+    lastSentCount = 0;
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -394,6 +429,8 @@ void loop() {
     if (pollInterval.isExpired()) {
         pollInterval.repeat();
         updateSensors();
+        if (keepaliveTimer.isExpired() || levelsChanged())
+            sendUpdate();
     }
 }
 

@@ -81,7 +81,9 @@ Three pump states: `STATE_CITY=0`, `STATE_AUTO=1`, `STATE_RAIN=2`. In AUTO, the 
 
 | Register | FC | Meaning |
 |----------|----|---------|
-| 0x0004 | 0x03 | Raw PV reading (signed 16-bit); divide by 10^(reg 0x0003) for actual value |
+| 0x0002 | 0x03 | Unit code (16=m, 17=cm, 18=mm, 1=KPa, …) |
+| 0x0003 | 0x03 | Decimal point position (0–4); actual value = raw ÷ 10^position |
+| 0x0004 | 0x03 | Raw PV reading (signed 16-bit) |
 | 0x0000 | 0x06 | Write new device address (1–255); takes effect immediately after echo |
 | 0x000F | 0x06, value=0 | Save settings to EEPROM (must be sent at the **new** address after an address change) |
 
@@ -89,7 +91,7 @@ Default sensor settings: 9600 baud, N, 8, 1; factory default address 0x01.
 
 **Address provisioning workflow**: connect one sensor at a time (factory default 0x01), navigate to `http://raingauge485.local/`, use the form to assign it one of addresses 1–4, then connect the next sensor. The firmware sends the address-change command then the save command at the new address.
 
-`sendUpdate()` is a stub — it will eventually send calibrated water levels to `rainpump32` via HTTP GET (same as `raingauge32`), but is not called until hardware is tested and levels are calibrated. The server URL is discovered via mDNS at boot (same pattern as `raingauge32`) and shown on the status page.
+**`sendUpdate()`**: sends raw sensor values to `rainpump32` via HTTP GET (`?x&level1=<raw>&level2=...`). Present sensors are packed to the front — if only address 0x03 is live it sends `?level1=`, not `?level3=`. Fires immediately when any level changes, and at least once every 60 seconds as a keepalive. Calibration (raw → 0–1000‰ water level) is performed on `rainpump32` using its stored min/max values. The server URL is discovered via mDNS at boot and shown on the status page.
 
 ### Other Targets
 
