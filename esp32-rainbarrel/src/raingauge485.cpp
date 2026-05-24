@@ -1,4 +1,5 @@
 #ifdef RAINGAUGE485
+// Hardware docs at: https://www.waveshare.net/wiki/ESP32-S3-RS485-CAN
 
 #include "Arduino.h"
 #include <WiFi.h>
@@ -63,6 +64,7 @@ static uint16_t crc16(const uint8_t *buf, int len) {
 
 static void rs485_send(const uint8_t *buf, size_t len) {
     digitalWrite(RS485_EN_PIN, RS485_TX_ENABLE);
+    delay(2);
     Serial485.write(buf, len);
     Serial485.flush(); // wait for TX FIFO to drain into shift register
     delay(2);          // 2ms > 1.5 char-times at 9600 baud; ensures last stop bit clears
@@ -77,6 +79,7 @@ static int rs485_recv(uint8_t *buf, int expected) {
         if (millis() - start > (unsigned long)MODBUS_TIMEOUT_MS) break;
         if (Serial485.available()) buf[idx++] = (uint8_t)Serial485.read();
     }
+    delay(2);
     return idx;
 }
 
