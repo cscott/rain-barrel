@@ -76,7 +76,9 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
 #define WATER_READING_ZERO 0
 // (old) rain barrel 1 max observed 17194 rain barrel 2 got up to 17414
 // (new adc) around 32000 seems to be full, measured up to 32751 in testing
-#define WATER_READING_FULL 32000
+//#define WATER_READING_FULL 32000
+// (new) RS485, full scale is 2000 (200 cm)
+#define WATER_READING_FULL 2000
 // From datasheet: "Frequency(Hz) = (8.1Q) -3 +/- 10% where Q is L/min"
 // So if G(gallons/min) = Q/3.78541
 // 1 gal/s = 60 gal/min = 227.1246 L/min => 1839.7-3 ~= 1837Hz
@@ -90,10 +92,10 @@ bool setSnitchGPIO(uint8_t which, uint8_t level);
 #define FOREACH_FLOWMETER_ARG(x) x(0) x(1) x(2)
 #define FOREACH_FLOWMETER_ARG2(x) x(0,1) x(1,2) x(2,3)
 
-#define NUM_BARRELS 3
-#define FOREACH_BARREL(x) x x x
-#define FOREACH_BARREL_ARG(x) x(0) x(1) x(2)
-#define FOREACH_BARREL_ARG2(x) x(0,1) x(1,2) x(2,3)
+#define NUM_BARRELS 2
+#define FOREACH_BARREL(x) x x
+#define FOREACH_BARREL_ARG(x) x(0) x(1)
+#define FOREACH_BARREL_ARG2(x) x(0,1) x(1,2)
 
 #define NUM_SNITCHES 2
 #define FOREACH_SNITCH(x) x x
@@ -490,13 +492,22 @@ void handleRoot() {
 void handleUpdate() {
   // update level sensors
   boolean changedState = false;
-  for (uint8_t i = 0; i < server.args(); i++) {
+  int last_water_level = 0;
+  boolean saw_water_level = false;
 #define HANDLE_BARREL(ii,jj)                            \
+  for (uint8_t i = 0; i < server.args(); i++) {         \
     if (server.argName(i) == "level" #jj) {             \
-      state.water_level[ii] = server.arg(i).toInt();    \
       lastPing.restart();                               \
-    }
-    FOREACH_BARREL_ARG2(HANDLE_BARREL)
+      saw_water_level = true;                           \
+      last_water_level = server.arg(i).toInt();         \
+    }                                                   \
+  }                                                     \
+  if (saw_water_level) {                                \
+    /* copy water levels from last barrel if necessary */ \
+    state.water_level[ii] = last_water_level;           \
+  }
+  FOREACH_BARREL_ARG2(HANDLE_BARREL)
+  for (uint8_t i = 0; i < server.args(); i++) {
     if (server.argName(i) == "state") {
       state.user_state = server.arg(i).toInt();
       if (state.user_state < STATE_CITY || state.user_state > STATE_RAIN) {
