@@ -192,11 +192,13 @@ HASensorNumber ha_flow_meter[NUM_FLOWMETERS] = {
   FOREACH_FLOWMETER_ARG2(FLOWMETER_SENSOR)
 };
 
+/*
 #define SMRTY_SENSOR_RAW(x,y)                   \
   HATagScanner("smrty_raw_" #y),
 HATagScanner ha_smrty_raw[NUM_SNITCHES] = {
   FOREACH_SNITCH_ARG2(SMRTY_SENSOR_RAW)
 };
+*/
 #define SMRTY_SENSOR_MOISTURE(x,y)                                      \
   HASensorNumber("smrty_moisture_" #y, HASensorNumber::PrecisionP1),
 HASensorNumber ha_smrty_moisture[NUM_SNITCHES] = {
@@ -742,7 +744,7 @@ void publishSmrty(uint8_t snitchId, uint8_t seqno, struct smrty_msg *msg, bool g
              msg->addr, msg->cmd, msg->tx_data1, msg->tx_data2,
              msg->rx_data1, msg->rx_data2, msg->status,
              msg->checksum, good_checksum ? "":"*");
-    ha_smrty_raw[snitchId].tagScanned(buf);
+    //ha_smrty_raw[snitchId].tagScanned(buf);
     if (!good_checksum) { return; }
     // Do our best to decode these values.
     uint16_t tx_data = ((uint16_t)msg->tx_data2)<<8 | msg->tx_data1;
@@ -1042,7 +1044,7 @@ void setup() {
     }
 
 #define SNITCH_NAME(i,j)\
-    ha_smrty_raw[i].setName("SMRTY Raw Reads " #j);\
+    /*ha_smrty_raw[i].setName("SMRTY Raw Reads " #j);*/	\
     ha_smrty_moisture[i].setName("Soil Moisture " #j);\
     ha_smrty_temperature[i].setName("Soil Temperature " #j);
     FOREACH_SNITCH_ARG2(SNITCH_NAME);
@@ -1062,6 +1064,7 @@ void setup() {
     ha_pressure_sensor.setStateClass("measurement");
 
     ha_water_level_low_limit.setName("Water Level Low Limit");
+    ha_water_level_low_limit.setIcon("mdi:water-percent");
     ha_water_level_low_limit.setUnitOfMeasurement("%");
     ha_water_level_low_limit.setMin(0);
     ha_water_level_low_limit.setMax(100);

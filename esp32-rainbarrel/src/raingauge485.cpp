@@ -9,10 +9,12 @@
 #include <ArduinoOTA.h>
 #include <AsyncDelay.h>
 #include <HTTPClient.h>
+#include <ArduinoHA.h>
 #include "config.h"
 
 #define SERVER_MDNS_NAME "rainpump"
 #define MDNS_NAME        "raingauge485"
+#define USE_MQTT
 
 #define RS485_TX_PIN     17
 #define RS485_RX_PIN     18
@@ -31,6 +33,43 @@
 
 HardwareSerial Serial485(1);
 WebServer server(80);
+WiFiClient client; // change to WiFiClientSecure for TLS support
+HADevice ha_device;
+HAMqtt ha_mqtt(client, ha_device, 16/*maximum entities*/);
+# define MQTT_HOST IPAddress(192,168,198,32)
+# define MQTT_USER "mqtt103"
+# define MQTT_PASS "mqtt103"
+
+#define NUM_BARRELS 4
+#define FOREACH_BARREL(x) x x x x
+#define FOREACH_BARREL_ARG(x) x(0) x(1) x(2) x(3)
+#define FOREACH_BARREL_ARG2(x) x(0,1) x(1,2) x(2,3) x(3,4)
+#define BARREL_SENSOR(x,y)                                       \
+  HASensorNumber("waterlevel_" #y, HASensorNumber::PrecisionP1),
+#define BARREL_SENSOR_RAW(x,y)                                           \
+  HASensorNumber("waterlevel_raw_" #y, HASensorNumber::PrecisionP0),
+#define BARREL_SENSOR_MIN(x,y)                                  \
+  HANumber("waterlevel_min_" #y, HASensorNumber::PrecisionP0),
+#define BARREL_SENSOR_MAX(x,y)                                  \
+  HANumber("waterlevel_max_" #y, HASensorNumber::PrecisionP0),
+HASensorNumber ha_water_level[NUM_BARRELS] = {
+  FOREACH_BARREL_ARG2(BARREL_SENSOR)
+};
+HASensorNumber ha_water_level_raw[NUM_BARRELS] = {
+  FOREACH_BARREL_ARG2(BARREL_SENSOR_RAW)
+};
+HANumber ha_water_level_min[NUM_BARRELS] = {
+  FOREACH_BARREL_ARG2(BARREL_SENSOR_MIN)
+};
+HANumber ha_water_level_max[NUM_BARRELS] = {
+  FOREACH_BARREL_ARG2(BARREL_SENSOR_MAX)
+};
+static void onNumberCommand(HANumeric number, HANumber *sender) {
+  sender->setState(number); // store new value; report the selected option back
+}
+#define WATER_READING_ZERO 0
+// (new) RS485, full scale is 2000 (200 cm)
+#define WATER_READING_FULL 2000
 
 String serverBaseUrl = String("http://" SERVER_MDNS_NAME ".local:80/update");
 
@@ -156,27 +195,35 @@ static bool levelsChanged() {
     return count != lastSentCount;
 }
 
-// Send raw sensor values to rainpump32.  Calibration (raw → 0–1000%) is done
-// on rainpump32 side.  Present sensors are packed: first valid → level1, etc.
+// Send sensor values to rainpump32, as values 0-1000.
+// Present sensors are packed: first valid → level1, etc.
 void sendUpdate() {
     HTTPClient http;
-    WiFiClient client;
+    WiFiClient client2;
     String url = serverBaseUrl;
     url += "?x";
     int count = 0;
     for (int i = 0; i < NUM_SENSORS; i++) {
         if (!sensorPresent[i]) continue;
         count++;
+	int32_t level_min = ha_water_level_min[i].getCurrentState().toInt32();
+	int32_t level_max = ha_water_level_max[i].getCurrentState().toInt32();
+	level_min = max(WATER_READING_ZERO, level_min);
+	level_max = min(WATER_READING_FULL, level_max);
+	uint32_t level_pct = ((sensorValue[i] - level_min) * (uint32_t)1000) /
+	  (level_max - level_min);
         url += "&level";
         url += count;
         url += "=";
-        url += (int)sensorValue[i];
+        url += level_pct;
         lastSentLevel[count - 1] = sensorValue[i];
+	ha_water_level_raw[i].setValue(sensorValue[i]);
+	ha_water_level[i].setValue(static_cast<float>(level_pct/(float)10));
     }
     for (int i = count; i < NUM_SENSORS; i++) lastSentLevel[i] = 0;
     lastSentCount = count;
     Serial.println(url);
-    http.begin(client, url);
+    http.begin(client2, url);
     http.GET();
     http.end();
     keepaliveTimer.restart();
@@ -248,17 +295,24 @@ void updateSensors() {
 void handleRoot() {
     char rows[512] = "";
     for (int i = 0; i < NUM_SENSORS; i++) {
-        char row[128];
+        char row[256];
+	char minmax[128];
+	int32_t level_min = ha_water_level_min[i].getCurrentState().toInt32();
+	int32_t level_max = ha_water_level_max[i].getCurrentState().toInt32();
+	snprintf(minmax, sizeof(minmax), "<td>%d-%d</td>", (int)level_min, (int)level_max);
+
         if (sensorPresent[i]) {
             char depth[32] = "-";
-            if (sensorConfigValid[i])
+            if (sensorConfigValid[i]) {
                 formatDepth(depth, sizeof(depth), sensorValue[i], sensorDecimals[i], sensorUnit[i]);
+	    }
+	    int percent = (sensorValue[i] - level_min) * 100 / (level_max - level_min);
             snprintf(row, sizeof(row),
-                     "      <tr><td>0x%02X</td><td>%d</td><td>%s</td></tr>\n",
-                     i + 1, (int)sensorValue[i], depth);
+                     "      <tr><td>0x%02X</td><td>%d</td><td>%s</td>%s<td>%d%%</td></tr>\n",
+                     i + 1, (int)sensorValue[i], depth, minmax, percent);
         } else {
             snprintf(row, sizeof(row),
-                     "      <tr><td>0x%02X</td><td>-</td><td>-</td></tr>\n", i + 1);
+                     "      <tr><td>0x%02X</td><td>-</td><td>-</td>%s<td>-</td></tr>\n", i + 1, minmax);
         }
         strncat(rows, row, sizeof(rows) - strlen(rows) - 1);
     }
@@ -283,7 +337,7 @@ void handleRoot() {
         "    <p>Pump server: %s</p>\n"
         "    <h2>Sensor Readings (raw)</h2>\n"
         "    <table border='1'>\n"
-        "      <tr><th>Address</th><th>Raw Value</th><th>Depth</th></tr>\n"
+        "      <tr><th>Address</th><th>Raw Value</th><th>Depth</th><th>Min/Max</th><th>Percent</th></tr>\n"
         "%s"
         "    </table>\n"
         "    <h2>Assign Address</h2>\n"
@@ -383,6 +437,52 @@ void setup() {
         Serial.println("mDNS started: " MDNS_NAME);
     }
 
+    // XXX we want to spoof the mac of the old raingauge
+    byte mac[6] = { 0x94, 0xb9, 0x7e, 0x5f, 0x18, 0x38 };
+    //WiFi.macAddress(mac);
+    ha_device.setUniqueId(mac, sizeof(mac));
+    ha_device.setSoftwareVersion("1.0.0");
+    ha_device.setManufacturer("C. Scott Ananian");
+    ha_device.enableSharedAvailability();
+    ha_device.enableLastWill();
+
+    ha_device.setName("Rain Gauge");
+    ha_device.setModel("Rain Gauge");
+    //ha_device.setIcon("mdi:gauge");
+#define BARREL_NAME(i,j)                                        \
+    ha_water_level[i].setName("Water Level Barrel " #j);        \
+    ha_water_level_raw[i].setName("Water Level Barrel " #j " (raw)"); \
+    ha_water_level_min[i].setName("Water Level Barrel " #j " Minimum (raw)"); \
+    ha_water_level_max[i].setName("Water Level Barrel " #j " Maximum (raw)");
+    FOREACH_BARREL_ARG2(BARREL_NAME);
+    for (int i=0; i<NUM_BARRELS; i++) {
+      // unit of measurement enforcement got strict:
+      // https://github.com/home-assistant/core/issues/155785
+      //ha_water_level[i].setDeviceClass("volume_storage");
+      //ha_water_level[i].setUnitOfMeasurement("gal");
+      ha_water_level[i].setDeviceClass("moisture");
+      ha_water_level[i].setUnitOfMeasurement("%");
+      ha_water_level[i].setIcon("mdi:water-percent");
+      ha_water_level[i].setStateClass("measurement");
+      //ha_water_level_raw[i].setDeviceClass("volume_storage");
+      ha_water_level_raw[i].setUnitOfMeasurement("mm");
+      ha_water_level_raw[i].setIcon("mdi:gauge");
+      ha_water_level_raw[i].setStateClass("measurement");
+      ha_water_level_min[i].setMin(0);
+      ha_water_level_max[i].setMin(0);
+      ha_water_level_min[i].setMax(32768);
+      ha_water_level_max[i].setMax(32768);
+      ha_water_level_min[i].setStep(1);
+      ha_water_level_max[i].setStep(1);
+      ha_water_level_min[i].setRetain(true);
+      ha_water_level_max[i].setRetain(true);
+      ha_water_level_min[i].setCurrentState(WATER_READING_ZERO);
+      ha_water_level_max[i].setCurrentState(WATER_READING_FULL);
+      ha_water_level_min[i].onCommand(onNumberCommand);
+      ha_water_level_max[i].onCommand(onNumberCommand);
+    }
+    ha_mqtt.begin(MQTT_HOST, MQTT_USER, MQTT_PASS);
+
     // Discover the rainpump server via mDNS (same pattern as raingauge32 in v2rain.cpp)
     int n = MDNS.queryService("http", "tcp");
     for (int i = 0; i < n; i++) {
@@ -429,6 +529,7 @@ void setup() {
 void loop() {
     ArduinoOTA.handle();
     server.handleClient();
+    ha_mqtt.loop();
     if (pollInterval.isExpired()) {
         pollInterval.repeat();
         updateSensors();
